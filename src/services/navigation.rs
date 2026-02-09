@@ -14,11 +14,13 @@ pub fn navigate(galaxy: &mut Galaxy) {
     // TODO: If Klingons present in quadrant, they fire before warp move (Section 8.1).
     // TODO: If Enterprise destroyed by Klingon fire, end game.
 
-    // Energy/shields check (no-Klingons path)
+    // Energy/shields check (no-Klingons path, spec section 10.4)
     if galaxy.enterprise.energy <= 0.0 {
         if galaxy.enterprise.shields < 1.0 {
             println!("THE ENTERPRISE IS DEAD IN SPACE. IF YOU SURVIVE ALL IMPENDING");
             println!("ATTACK YOU WILL BE DEMOTED TO THE RANK OF PRIVATE");
+            // TODO: Implement repeated Klingon fire loop (spec 10.4)
+            return; // Prevent movement
         } else {
             println!(
                 "YOU HAVE {} UNITS OF ENERGY",
@@ -28,6 +30,7 @@ pub fn navigate(galaxy: &mut Galaxy) {
                 "SUGGEST YOU GET SOME FROM YOUR SHIELDS WHICH HAVE {} UNITS LEFT",
                 galaxy.enterprise.shields as i32
             );
+            return; // Prevent movement
         }
     }
 
@@ -212,6 +215,7 @@ fn execute_move(galaxy: &mut Galaxy, course: f64, warp_factor: f64) {
 
         // Boundary crossing always advances stardate by 1
         galaxy.stardate += 1.0;
+        check_time_limit(galaxy);
     } else {
         // Intra-quadrant move: update sector map
         let final_x = (sx + 0.5).floor() as i32;
@@ -229,13 +233,26 @@ fn execute_move(galaxy: &mut Galaxy, course: f64, warp_factor: f64) {
         // Advance stardate only for warp >= 1
         if warp_factor >= 1.0 {
             galaxy.stardate += 1.0;
+            check_time_limit(galaxy);
         }
     }
 
     // Energy cost: N - 5 (short moves can gain energy)
     galaxy.enterprise.energy -= (n - 5) as f64;
+}
 
-    // TODO: Check if stardate > starting_stardate + mission_duration → game over (Section 10).
+/// Check if the time limit has been exceeded and end the game if so (spec section 10.3).
+fn check_time_limit(galaxy: &Galaxy) {
+    let time_limit = galaxy.starting_stardate + galaxy.mission_duration;
+    if galaxy.stardate > time_limit {
+        println!();
+        println!("IT IS STARDATE {}", galaxy.stardate as i32);
+        println!(
+            "THERE ARE STILL {} KLINGON BATTLE CRUISERS",
+            galaxy.total_klingons
+        );
+        std::process::exit(0);
+    }
 }
 
 fn read_line(prompt: &str) -> String {
