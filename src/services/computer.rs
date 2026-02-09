@@ -2,6 +2,7 @@ use std::io::{self, Write};
 
 use crate::models::constants::{Device, GALAXY_SIZE};
 use crate::models::galaxy::Galaxy;
+use crate::models::position::SectorPosition;
 
 /// Library Computer — Command 7 (spec section 6.7).
 pub fn library_computer(galaxy: &mut Galaxy) {
@@ -17,7 +18,7 @@ pub fn library_computer(galaxy: &mut Galaxy) {
     match input {
         "0" => cumulative_galactic_record(galaxy),
         "1" => status_report(galaxy),
-        "2" => println!("NOT YET IMPLEMENTED"),
+        "2" => photon_torpedo_data(galaxy),
         _ => print_computer_menu(),
     }
 }
@@ -61,6 +62,128 @@ fn status_report(galaxy: &Galaxy) {
 
     // Falls through to damage control report (spec section 6.7)
     galaxy.enterprise.damage_report();
+}
+
+/// Option 2 — Photon Torpedo Data (spec section 6.7).
+/// Displays direction and distance to each Klingon, then offers calculator.
+fn photon_torpedo_data(galaxy: &Galaxy) {
+    // Display data for each living Klingon
+    for klingon in &galaxy.sector_map.klingons {
+        if klingon.shields <= 0.0 {
+            continue; // Skip dead Klingons
+        }
+
+        let (direction, distance) = calculate_direction_and_distance(
+            galaxy.enterprise.sector,
+            klingon.sector,
+        );
+
+        println!("DIRECTION = {:.2}", direction);
+        println!("DISTANCE  = {:.2}", distance);
+    }
+
+    // Calculator option
+    println!("ENTER 1 TO USE THE CALCULATOR");
+    let input = read_line("");
+    if input.trim() == "1" {
+        use_calculator(galaxy);
+    }
+}
+
+/// Calculator sub-feature of photon torpedo data (spec section 6.7).
+/// Allows player to calculate direction/distance between any two coordinates.
+fn use_calculator(galaxy: &Galaxy) {
+    println!(
+        "YOU ARE AT QUADRANT {},{} SECTOR {},{}",
+        galaxy.enterprise.quadrant.x,
+        galaxy.enterprise.quadrant.y,
+        galaxy.enterprise.sector.x,
+        galaxy.enterprise.sector.y
+    );
+    println!("SHIP'S & TARGET'S COORDINATES ARE");
+
+    let input = read_line("");
+    let coords: Vec<&str> = input.trim().split(',').collect();
+    if coords.len() != 4 {
+        return;
+    }
+
+    let source_x: i32 = coords[0].trim().parse().unwrap_or(0);
+    let source_y: i32 = coords[1].trim().parse().unwrap_or(0);
+    let target_x: i32 = coords[2].trim().parse().unwrap_or(0);
+    let target_y: i32 = coords[3].trim().parse().unwrap_or(0);
+
+    let source = SectorPosition {
+        x: source_x,
+        y: source_y,
+    };
+    let target = SectorPosition {
+        x: target_x,
+        y: target_y,
+    };
+
+    let (direction, distance) = calculate_direction_and_distance(source, target);
+
+    println!("DIRECTION = {:.2}", direction);
+    println!("DISTANCE  = {:.2}", distance);
+
+    // Warp units calculation (max of absolute deltas)
+    let warp_units = ((target_x - source_x).abs()).max((target_y - source_y).abs());
+    let plural = if warp_units != 1 { "S" } else { "" };
+    println!("   ({} WARP UNIT{})", warp_units, plural);
+}
+
+/// Direction and distance calculation (spec section 7.4).
+/// Uses the original ratio-based algorithm from the spec.
+fn calculate_direction_and_distance(
+    source: SectorPosition,
+    target: SectorPosition,
+) -> (f64, f64) {
+    let delta_x = (target.x - source.x) as f64;
+    let delta_y = (source.y - target.y) as f64; // Inverted per spec
+
+    let distance = (delta_x * delta_x + delta_y * delta_y).sqrt();
+
+    // Direction calculation (spec section 7.4)
+    let direction = if delta_x >= 0.0 && delta_y >= 0.0 {
+        // Case 1: right and/or up
+        let base = if delta_x > 0.0 || delta_y > 0.0 {
+            1.0
+        } else {
+            5.0
+        };
+        if delta_y.abs() <= delta_x.abs() {
+            base + delta_y.abs() / delta_x.abs()
+        } else {
+            base + (delta_y.abs() - delta_x.abs() + delta_y.abs()) / delta_y.abs()
+        }
+    } else if delta_x < 0.0 && delta_y > 0.0 {
+        // Case 2: left and up
+        let base = 3.0;
+        if delta_y.abs() >= delta_x.abs() {
+            base + delta_x.abs() / delta_y.abs()
+        } else {
+            base + (delta_x.abs() - delta_y.abs() + delta_x.abs()) / delta_x.abs()
+        }
+    } else if delta_x >= 0.0 && delta_y < 0.0 {
+        // Case 3: right and down
+        let base = 7.0;
+        if delta_y.abs() >= delta_x.abs() {
+            base + delta_x.abs() / delta_y.abs()
+        } else {
+            base + (delta_x.abs() - delta_y.abs() + delta_x.abs()) / delta_x.abs()
+        }
+    } else {
+        // Case 4: left and down
+        let base = 5.0;
+        if delta_y.abs() <= delta_x.abs() {
+            base + delta_y.abs() / delta_x.abs()
+        } else {
+            base + (delta_y.abs() - delta_x.abs() + delta_y.abs()) / delta_y.abs()
+        }
+    };
+
+    (direction, distance)
 }
 
 fn print_computer_menu() {
@@ -177,5 +300,97 @@ mod tests {
         galaxy.enterprise.devices[Device::DamageControl as usize] = -1.0;
         // The fall-through damage report should print "not available" but not panic
         status_report(&galaxy);
+    }
+
+    // --- Photon Torpedo Data Tests (Option 2) ---
+
+    #[test]
+    fn direction_calculation_east() {
+        // Course 1 (east): from (4,4) to (7,4) → direction should be ~1.0
+        let source = SectorPosition { x: 4, y: 4 };
+        let target = SectorPosition { x: 7, y: 4 };
+        let (direction, _distance) = super::calculate_direction_and_distance(source, target);
+        assert!(
+            (direction - 1.0).abs() < 0.01,
+            "east should be ~1.0, got {}",
+            direction
+        );
+    }
+
+    #[test]
+    fn direction_calculation_north() {
+        // Course 3 (north): from (4,4) to (4,1) → direction should be ~3.0
+        let source = SectorPosition { x: 4, y: 4 };
+        let target = SectorPosition { x: 4, y: 1 };
+        let (direction, _distance) = super::calculate_direction_and_distance(source, target);
+        assert!(
+            (direction - 3.0).abs() < 0.01,
+            "north should be ~3.0, got {}",
+            direction
+        );
+    }
+
+    #[test]
+    fn direction_calculation_west() {
+        // Course 5 (west): from (4,4) to (1,4) → direction should be ~5.0
+        let source = SectorPosition { x: 4, y: 4 };
+        let target = SectorPosition { x: 1, y: 4 };
+        let (direction, _distance) = super::calculate_direction_and_distance(source, target);
+        assert!(
+            (direction - 5.0).abs() < 0.01,
+            "west should be ~5.0, got {}",
+            direction
+        );
+    }
+
+    #[test]
+    fn direction_calculation_south() {
+        // Course 7 (south): from (4,4) to (4,7) → direction should be ~7.0
+        let source = SectorPosition { x: 4, y: 4 };
+        let target = SectorPosition { x: 4, y: 7 };
+        let (direction, _distance) = super::calculate_direction_and_distance(source, target);
+        assert!(
+            (direction - 7.0).abs() < 0.01,
+            "south should be ~7.0, got {}",
+            direction
+        );
+    }
+
+    #[test]
+    fn distance_calculation_horizontal() {
+        // 3 units east
+        let source = SectorPosition { x: 2, y: 5 };
+        let target = SectorPosition { x: 5, y: 5 };
+        let (_direction, distance) = super::calculate_direction_and_distance(source, target);
+        assert!(
+            (distance - 3.0).abs() < 0.01,
+            "distance should be 3.0, got {}",
+            distance
+        );
+    }
+
+    #[test]
+    fn distance_calculation_diagonal() {
+        // 3 units east, 4 units south → distance = 5 (3-4-5 triangle)
+        let source = SectorPosition { x: 2, y: 2 };
+        let target = SectorPosition { x: 5, y: 6 };
+        let (_direction, distance) = super::calculate_direction_and_distance(source, target);
+        assert!(
+            (distance - 5.0).abs() < 0.01,
+            "distance should be 5.0, got {}",
+            distance
+        );
+    }
+
+    #[test]
+    fn distance_calculation_same_position() {
+        let source = SectorPosition { x: 4, y: 4 };
+        let target = SectorPosition { x: 4, y: 4 };
+        let (_direction, distance) = super::calculate_direction_and_distance(source, target);
+        assert!(
+            distance.abs() < 0.01,
+            "distance should be 0.0, got {}",
+            distance
+        );
     }
 }
