@@ -1,7 +1,7 @@
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 
-use super::constants::{GALAXY_SIZE, MISSION_DURATION, SectorContent};
+use super::constants::{Condition, Device, GALAXY_SIZE, INITIAL_ENERGY, MISSION_DURATION, SECTOR_SIZE, SectorContent};
 use super::enterprise::Enterprise;
 use super::klingon::Klingon;
 use super::position::{QuadrantPosition, SectorPosition};
@@ -166,5 +166,74 @@ impl Galaxy {
     fn get_current_quadrant_data(&self) -> QuadrantData {
         let q = self.enterprise.quadrant;
         self.quadrants[(q.y - 1) as usize][(q.x - 1) as usize]
+    }
+
+    /// Check if the Enterprise is adjacent to a starbase and dock if so.
+    /// Returns true if docked (spec section 9.1-9.2).
+    pub fn check_docking(&mut self) -> bool {
+        if let Some(base) = self.sector_map.starbase {
+            let es = self.enterprise.sector;
+            if (es.x - base.x).abs() <= 1 && (es.y - base.y).abs() <= 1 {
+                self.enterprise.dock();
+                println!("SHIELDS DROPPED FOR DOCKING PURPOSES");
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Evaluate the ship's condition code (spec section 9.4).
+    pub fn evaluate_condition(&self) -> Condition {
+        // Check docking adjacency (without side effects)
+        if let Some(base) = self.sector_map.starbase {
+            let es = self.enterprise.sector;
+            if (es.x - base.x).abs() <= 1 && (es.y - base.y).abs() <= 1 {
+                return Condition::Docked;
+            }
+        }
+
+        if !self.sector_map.klingons.is_empty() {
+            Condition::Red
+        } else if self.enterprise.energy < INITIAL_ENERGY * 0.1 {
+            Condition::Yellow
+        } else {
+            Condition::Green
+        }
+    }
+
+    /// Short Range Sensor Scan — Command 1 (spec section 6.1).
+    pub fn short_range_scan(&mut self) {
+        self.check_docking();
+        let condition = self.evaluate_condition();
+
+        if self.enterprise.is_damaged(Device::ShortRangeSensors) {
+            println!("*** SHORT RANGE SENSORS ARE OUT ***");
+            return;
+        }
+
+        let border = "-=--=--=--=--=--=--=--=-";
+        let e = &self.enterprise;
+        let status: [String; SECTOR_SIZE] = [
+            format!("STARDATE  {}", self.stardate as i32),
+            format!("CONDITION {}", condition.label()),
+            format!("QUADRANT  {},{}", e.quadrant.x, e.quadrant.y),
+            format!("SECTOR    {},{}", e.sector.x, e.sector.y),
+            format!("ENERGY    {}", e.energy as i32),
+            format!("SHIELDS   {}", e.shields as i32),
+            format!("PHOTON TORPEDOES {}", e.torpedoes),
+            String::new(),
+        ];
+
+        println!("{}", border);
+        for y in 1..=SECTOR_SIZE as i32 {
+            let row = self.sector_map.render_row(y);
+            let idx = (y - 1) as usize;
+            if !status[idx].is_empty() {
+                println!("{}        {}", row, status[idx]);
+            } else {
+                println!("{}", row);
+            }
+        }
+        println!("{}", border);
     }
 }

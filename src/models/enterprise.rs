@@ -28,4 +28,11 @@ impl Enterprise {
     pub fn is_damaged(&self, device: Device) -> bool {
         self.devices[device as usize] < 0.0
     }
+
+    /// Reset ship resources when docking at a starbase (spec section 9.2).
+    pub fn dock(&mut self) {
+        self.energy = INITIAL_ENERGY;
+        self.torpedoes = INITIAL_TORPEDOES;
+        self.shields = INITIAL_SHIELDS;
+    }
 }

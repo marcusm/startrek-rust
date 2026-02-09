@@ -1,3 +1,5 @@
+use std::io::{self, Write};
+
 use crate::models::galaxy::Galaxy;
 
 pub struct Game {
@@ -13,7 +15,28 @@ impl Game {
 
     pub fn run(&mut self) {
         self.print_mission_briefing();
-        // Future: game command loop
+        self.galaxy.short_range_scan();
+
+        loop {
+            let input = Self::read_line("COMMAND");
+            let input = input.trim();
+
+            match input {
+                "0" => println!("NOT YET IMPLEMENTED"),
+                "1" => self.galaxy.short_range_scan(),
+                "2" => println!("NOT YET IMPLEMENTED"),
+                "3" => println!("NOT YET IMPLEMENTED"),
+                "4" => println!("NOT YET IMPLEMENTED"),
+                "5" => println!("NOT YET IMPLEMENTED"),
+                "6" => println!("NOT YET IMPLEMENTED"),
+                "7" => println!("NOT YET IMPLEMENTED"),
+                "q" | "Q" => {
+                    println!("GOODBYE, CAPTAIN.");
+                    break;
+                }
+                _ => Self::print_command_menu(),
+            }
+        }
     }
 
     fn print_mission_briefing(&self) {
@@ -23,5 +46,24 @@ impl Game {
             "YOU MUST DESTROY {} KINGONS IN {} STARDATES WITH {} STARBASE{}",
             g.total_klingons, g.mission_duration as i32, g.total_starbases, plural,
         );
+    }
+
+    fn print_command_menu() {
+        println!("   0 = SET COURSE");
+        println!("   1 = SHORT RANGE SENSOR SCAN");
+        println!("   2 = LONG RANGE SENSOR SCAN");
+        println!("   3 = FIRE PHASERS");
+        println!("   4 = FIRE PHOTON TORPEDOES");
+        println!("   5 = SHIELD CONTROL");
+        println!("   6 = DAMAGE CONTROL REPORT");
+        println!("   7 = CALL ON LIBRARY COMPUTER");
+    }
+
+    fn read_line(prompt: &str) -> String {
+        print!("{} ", prompt);
+        io::stdout().flush().unwrap();
+        let mut input = String::new();
+        io::stdin().read_line(&mut input).unwrap();
+        input
     }
 }

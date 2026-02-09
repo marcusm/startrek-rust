@@ -36,4 +36,12 @@ impl SectorMap {
     pub fn is_empty(&self, pos: SectorPosition) -> bool {
         self.get(pos) == SectorContent::Empty
     }
+
+    /// Render a row of the sector grid as a 24-character string.
+    /// y is 1-based (1-8).
+    pub fn render_row(&self, y: i32) -> String {
+        (1..=SECTOR_SIZE as i32)
+            .map(|x| self.get(SectorPosition { x, y }).symbol())
+            .collect()
+    }
 }
