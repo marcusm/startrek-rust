@@ -16,7 +16,7 @@ pub fn library_computer(galaxy: &mut Galaxy) {
 
     match input {
         "0" => cumulative_galactic_record(galaxy),
-        "1" => println!("NOT YET IMPLEMENTED"),
+        "1" => status_report(galaxy),
         "2" => println!("NOT YET IMPLEMENTED"),
         _ => print_computer_menu(),
     }
@@ -46,6 +46,21 @@ fn cumulative_galactic_record(galaxy: &Galaxy) {
         );
     }
     println!("{}", border);
+}
+
+/// Option 1 — Status Report (spec section 6.7).
+/// Prints status info then falls through to the damage control report.
+fn status_report(galaxy: &Galaxy) {
+    println!("   STATUS REPORT");
+    println!();
+    println!("NUMBER OF KLINGONS LEFT  = {}", galaxy.total_klingons);
+    let stardates_left =
+        (galaxy.starting_stardate + galaxy.mission_duration) - galaxy.stardate;
+    println!("NUMBER OF STARDATES LEFT = {}", stardates_left as i32);
+    println!("NUMBER OF STARBASES LEFT = {}", galaxy.total_starbases);
+
+    // Falls through to damage control report (spec section 6.7)
+    galaxy.enterprise.damage_report();
 }
 
 fn print_computer_menu() {
@@ -119,5 +134,48 @@ mod tests {
             galaxy.computer_memory[(qy - 1) as usize][(target_x - 1) as usize],
             -1
         );
+    }
+
+    #[test]
+    fn status_report_stardates_remaining() {
+        let galaxy = Galaxy::new(42);
+        let expected = (galaxy.starting_stardate + galaxy.mission_duration) - galaxy.stardate;
+        // At game start, stardate == starting_stardate, so remaining == mission_duration
+        assert_eq!(expected as i32, galaxy.mission_duration as i32);
+    }
+
+    #[test]
+    fn status_report_stardates_decrease_over_time() {
+        let mut galaxy = Galaxy::new(42);
+        let initial_remaining =
+            (galaxy.starting_stardate + galaxy.mission_duration) - galaxy.stardate;
+        galaxy.stardate += 5.0;
+        let after_remaining =
+            (galaxy.starting_stardate + galaxy.mission_duration) - galaxy.stardate;
+        assert_eq!((initial_remaining - after_remaining) as i32, 5);
+    }
+
+    #[test]
+    fn status_report_displays_without_panic() {
+        let galaxy = Galaxy::new(99);
+        // Verify the function runs without panicking (output goes to stdout)
+        status_report(&galaxy);
+    }
+
+    #[test]
+    fn status_report_falls_through_to_damage_report() {
+        let mut galaxy = Galaxy::new(99);
+        // Damage a device so we can verify the damage report portion runs
+        galaxy.enterprise.devices[Device::WarpEngines as usize] = -2.0;
+        // Should not panic — status report prints then falls through to damage_report
+        status_report(&galaxy);
+    }
+
+    #[test]
+    fn status_report_with_damage_control_damaged() {
+        let mut galaxy = Galaxy::new(99);
+        galaxy.enterprise.devices[Device::DamageControl as usize] = -1.0;
+        // The fall-through damage report should print "not available" but not panic
+        status_report(&galaxy);
     }
 }

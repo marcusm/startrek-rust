@@ -31,7 +31,7 @@ impl Game {
                 "3" => println!("NOT YET IMPLEMENTED"),
                 "4" => println!("NOT YET IMPLEMENTED"),
                 "5" => println!("NOT YET IMPLEMENTED"),
-                "6" => println!("NOT YET IMPLEMENTED"),
+                "6" => self.galaxy.enterprise.damage_report(),
                 "7" => computer::library_computer(&mut self.galaxy),
                 "q" | "Q" => {
                     println!("GOODBYE, CAPTAIN.");
@@ -46,7 +46,7 @@ impl Game {
         let g = &self.galaxy;
         let plural = if g.total_starbases != 1 { "S" } else { "" };
         println!(
-            "YOU MUST DESTROY {} KINGONS IN {} STARDATES WITH {} STARBASE{}",
+            "YOU MUST DESTROY {} KLINGONS IN {} STARDATES WITH {} STARBASE{}",
             g.total_klingons, g.mission_duration as i32, g.total_starbases, plural,
         );
     }
