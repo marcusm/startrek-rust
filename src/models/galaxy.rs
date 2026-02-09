@@ -155,6 +155,12 @@ impl Galaxy {
             let pos = self.find_random_empty_sector();
             self.sector_map.set(pos, SectorContent::Star);
         }
+
+        // Red alert check (spec section 4.2)
+        if !self.sector_map.klingons.is_empty() && self.enterprise.shields <= 200.0 {
+            println!("COMBAT AREA      CONDITION RED");
+            println!("   SHIELDS DANGEROUSLY LOW");
+        }
     }
 
     /// Find a random empty sector by picking random coordinates until one is empty.
