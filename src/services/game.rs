@@ -1,6 +1,7 @@
 use std::io::{self, Write};
 
 use crate::models::galaxy::Galaxy;
+use crate::services::combat;
 use crate::services::computer;
 use crate::services::navigation;
 use crate::services::scan;
@@ -28,7 +29,7 @@ impl Game {
                 "0" => navigation::navigate(&mut self.galaxy),
                 "1" => scan::short_range_scan(&mut self.galaxy),
                 "2" => scan::long_range_scan(&mut self.galaxy),
-                "3" => println!("NOT YET IMPLEMENTED"),
+                "3" => combat::fire_phasers(&mut self.galaxy),
                 "4" => println!("NOT YET IMPLEMENTED"),
                 "5" => println!("NOT YET IMPLEMENTED"),
                 "6" => self.galaxy.enterprise.damage_report(),

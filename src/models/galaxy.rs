@@ -209,6 +209,41 @@ impl Galaxy {
         }
     }
 
+    /// Check if the player has achieved victory (spec section 10.1).
+    pub fn is_victory(&self) -> bool {
+        self.total_klingons == 0
+    }
+
+    /// Calculate the efficiency rating (spec section 7.7).
+    pub fn efficiency_rating(&self) -> i32 {
+        let elapsed = self.stardate - self.starting_stardate;
+        ((self.initial_klingons as f64 / elapsed) * 1000.0) as i32
+    }
+
+    /// End the game with victory message and exit (spec section 10.1).
+    pub fn end_victory(&self) {
+        println!();
+        println!("THE LAST KLINGON BATTLE CRUISER IN THE GALAXY HAS BEEN DESTROYED");
+        println!("THE FEDERATION HAS BEEN SAVED !!!");
+        println!();
+        println!("YOUR EFFICIENCY RATING = {}", self.efficiency_rating());
+        std::process::exit(0);
+    }
+
+    /// End the game with defeat message and exit (spec section 10.2).
+    pub fn end_defeat(&self) {
+        println!();
+        println!("THE ENTERPRISE HAS BEEN DESTROYED. THE FEDERATION WILL BE CONQUERED");
+        println!("THERE ARE STILL {} KLINGON BATTLE CRUISERS", self.total_klingons);
+        std::process::exit(0);
+    }
+
+    /// Update the quadrant's klingon count after removing one.
+    pub fn decrement_quadrant_klingons(&mut self) {
+        let q = self.enterprise.quadrant;
+        self.quadrants[(q.y - 1) as usize][(q.x - 1) as usize].klingons -= 1;
+    }
+
 }
 
 #[cfg(test)]
@@ -511,5 +546,53 @@ mod tests {
                 row.len()
             );
         }
+    }
+
+    // ========== Game over condition tests ==========
+
+    #[test]
+    fn is_victory_when_no_klingons() {
+        let mut galaxy = Galaxy::new(42);
+        galaxy.total_klingons = 0;
+        assert!(galaxy.is_victory());
+    }
+
+    #[test]
+    fn not_victory_when_klingons_remain() {
+        let galaxy = Galaxy::new(42);
+        assert!(!galaxy.is_victory());
+        assert!(galaxy.total_klingons > 0);
+    }
+
+    #[test]
+    fn efficiency_rating_calculation() {
+        let mut galaxy = Galaxy::new(42);
+        galaxy.initial_klingons = 15;
+        galaxy.starting_stardate = 2000.0;
+        galaxy.stardate = 2010.0; // elapsed = 10
+        // (15 / 10) * 1000 = 1500
+        assert_eq!(galaxy.efficiency_rating(), 1500);
+    }
+
+    #[test]
+    fn efficiency_rating_truncates_to_integer() {
+        let mut galaxy = Galaxy::new(42);
+        galaxy.initial_klingons = 17;
+        galaxy.starting_stardate = 2000.0;
+        galaxy.stardate = 2007.0; // elapsed = 7
+        // (17 / 7) * 1000 = 2428.571... truncated to 2428
+        assert_eq!(galaxy.efficiency_rating(), 2428);
+    }
+
+    #[test]
+    fn decrement_quadrant_klingons_updates_count() {
+        let mut galaxy = Galaxy::new(42);
+        let q = galaxy.enterprise.quadrant;
+        let initial_count = galaxy.quadrants[(q.y - 1) as usize][(q.x - 1) as usize].klingons;
+
+        galaxy.decrement_quadrant_klingons();
+
+        let new_count = galaxy.quadrants[(q.y - 1) as usize][(q.x - 1) as usize].klingons;
+        assert_eq!(new_count, initial_count - 1);
     }
 }

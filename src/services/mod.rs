@@ -1,3 +1,4 @@
+pub mod combat;
 pub mod computer;
 pub mod game;
 pub mod navigation;
