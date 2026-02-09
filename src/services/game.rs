@@ -1,6 +1,7 @@
 use std::io::{self, Write};
 
 use crate::models::galaxy::Galaxy;
+use crate::services::navigation;
 
 pub struct Game {
     pub galaxy: Galaxy,
@@ -22,7 +23,7 @@ impl Game {
             let input = input.trim();
 
             match input {
-                "0" => println!("NOT YET IMPLEMENTED"),
+                "0" => navigation::navigate(&mut self.galaxy),
                 "1" => self.galaxy.short_range_scan(),
                 "2" => println!("NOT YET IMPLEMENTED"),
                 "3" => println!("NOT YET IMPLEMENTED"),
