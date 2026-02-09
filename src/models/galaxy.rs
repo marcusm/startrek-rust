@@ -237,3 +237,392 @@ impl Galaxy {
         println!("{}", border);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::constants::{
+        Condition, Device, GALAXY_SIZE, INITIAL_ENERGY, INITIAL_SHIELDS, INITIAL_TORPEDOES,
+        MISSION_DURATION, SECTOR_SIZE, SectorContent,
+    };
+
+    // ========== Galaxy initialization tests ==========
+
+    #[test]
+    fn new_galaxy_has_positive_klingons_and_starbases() {
+        let galaxy = Galaxy::new(0);
+        assert!(galaxy.total_klingons > 0, "must have at least one Klingon");
+        assert!(
+            galaxy.total_starbases > 0,
+            "must have at least one starbase"
+        );
+    }
+
+    #[test]
+    fn initial_klingons_equals_total_klingons() {
+        let galaxy = Galaxy::new(42);
+        assert_eq!(galaxy.initial_klingons, galaxy.total_klingons);
+    }
+
+    #[test]
+    fn stardate_is_multiple_of_100() {
+        for seed in 0..20 {
+            let galaxy = Galaxy::new(seed);
+            assert_eq!(
+                galaxy.stardate % 100.0,
+                0.0,
+                "seed {}: stardate {} should be a multiple of 100",
+                seed,
+                galaxy.stardate
+            );
+        }
+    }
+
+    #[test]
+    fn stardate_in_valid_range() {
+        for seed in 0..20 {
+            let galaxy = Galaxy::new(seed);
+            assert!(
+                galaxy.stardate >= 2000.0 && galaxy.stardate <= 3900.0,
+                "seed {}: stardate {} out of range [2000, 3900]",
+                seed,
+                galaxy.stardate
+            );
+        }
+    }
+
+    #[test]
+    fn mission_duration_is_30() {
+        let galaxy = Galaxy::new(0);
+        assert_eq!(galaxy.mission_duration, MISSION_DURATION);
+    }
+
+    #[test]
+    fn enterprise_position_in_valid_range() {
+        for seed in 0..20 {
+            let galaxy = Galaxy::new(seed);
+            let q = galaxy.enterprise.quadrant;
+            let s = galaxy.enterprise.sector;
+            assert!(q.x >= 1 && q.x <= 8, "quadrant x out of range");
+            assert!(q.y >= 1 && q.y <= 8, "quadrant y out of range");
+            assert!(s.x >= 1 && s.x <= 8, "sector x out of range");
+            assert!(s.y >= 1 && s.y <= 8, "sector y out of range");
+        }
+    }
+
+    #[test]
+    fn enterprise_starts_with_full_resources() {
+        let galaxy = Galaxy::new(0);
+        assert_eq!(galaxy.enterprise.energy, INITIAL_ENERGY);
+        assert_eq!(galaxy.enterprise.torpedoes, INITIAL_TORPEDOES);
+        assert_eq!(galaxy.enterprise.shields, INITIAL_SHIELDS);
+    }
+
+    #[test]
+    fn quadrant_klingon_counts_sum_to_total() {
+        let galaxy = Galaxy::new(42);
+        let mut sum = 0;
+        for y in 0..GALAXY_SIZE {
+            for x in 0..GALAXY_SIZE {
+                let k = galaxy.quadrants[y][x].klingons;
+                assert!(k >= 0 && k <= 3, "klingon count out of [0,3]");
+                sum += k;
+            }
+        }
+        assert_eq!(sum, galaxy.total_klingons);
+    }
+
+    #[test]
+    fn quadrant_starbase_counts_sum_to_total() {
+        let galaxy = Galaxy::new(42);
+        let mut sum = 0;
+        for y in 0..GALAXY_SIZE {
+            for x in 0..GALAXY_SIZE {
+                let b = galaxy.quadrants[y][x].starbases;
+                assert!(b == 0 || b == 1, "starbase count not 0 or 1");
+                sum += b;
+            }
+        }
+        assert_eq!(sum, galaxy.total_starbases);
+    }
+
+    #[test]
+    fn stars_in_valid_range() {
+        let galaxy = Galaxy::new(42);
+        for y in 0..GALAXY_SIZE {
+            for x in 0..GALAXY_SIZE {
+                let s = galaxy.quadrants[y][x].stars;
+                assert!(s >= 1 && s <= 8, "stars {} out of range [1,8]", s);
+            }
+        }
+    }
+
+    #[test]
+    fn computer_memory_starts_zeroed() {
+        let galaxy = Galaxy::new(0);
+        for y in 0..GALAXY_SIZE {
+            for x in 0..GALAXY_SIZE {
+                assert_eq!(galaxy.computer_memory[y][x], 0);
+            }
+        }
+    }
+
+    #[test]
+    fn sector_map_has_enterprise_after_init() {
+        let galaxy = Galaxy::new(42);
+        let content = galaxy.sector_map.get(galaxy.enterprise.sector);
+        assert_eq!(content, SectorContent::Enterprise);
+    }
+
+    #[test]
+    fn sector_map_entity_counts_match_quadrant_data() {
+        let galaxy = Galaxy::new(42);
+        let q = galaxy.enterprise.quadrant;
+        let qdata = galaxy.quadrants[(q.y - 1) as usize][(q.x - 1) as usize];
+
+        assert_eq!(
+            galaxy.sector_map.klingons.len() as i32,
+            qdata.klingons,
+            "klingon count mismatch"
+        );
+
+        if qdata.starbases > 0 {
+            assert!(galaxy.sector_map.starbase.is_some());
+        } else {
+            assert!(galaxy.sector_map.starbase.is_none());
+        }
+
+        // Count stars in the sector map
+        let mut star_count = 0;
+        for y in 1..=8 {
+            for x in 1..=8 {
+                if galaxy.sector_map.get(SectorPosition { x, y }) == SectorContent::Star {
+                    star_count += 1;
+                }
+            }
+        }
+        assert_eq!(star_count, qdata.stars, "star count mismatch");
+    }
+
+    #[test]
+    fn deterministic_with_same_seed() {
+        let g1 = Galaxy::new(123);
+        let g2 = Galaxy::new(123);
+        assert_eq!(g1.stardate, g2.stardate);
+        assert_eq!(g1.total_klingons, g2.total_klingons);
+        assert_eq!(g1.total_starbases, g2.total_starbases);
+        assert_eq!(g1.enterprise.quadrant, g2.enterprise.quadrant);
+        assert_eq!(g1.enterprise.sector, g2.enterprise.sector);
+    }
+
+    #[test]
+    fn different_seeds_produce_different_galaxies() {
+        let g1 = Galaxy::new(1);
+        let g2 = Galaxy::new(2);
+        // At least one of these should differ
+        let same = g1.stardate == g2.stardate
+            && g1.total_klingons == g2.total_klingons
+            && g1.enterprise.quadrant == g2.enterprise.quadrant;
+        assert!(!same, "different seeds should produce different state");
+    }
+
+    // ========== Check docking tests ==========
+
+    /// Helper: set up a galaxy with a starbase at a known position.
+    fn setup_galaxy_with_starbase(
+        enterprise_sector: SectorPosition,
+        starbase_sector: SectorPosition,
+    ) -> Galaxy {
+        let mut galaxy = Galaxy::new(42);
+        // Clear sector map
+        galaxy.sector_map = SectorMap::new();
+        galaxy.enterprise.sector = enterprise_sector;
+        // Drain some energy/shields so we can verify dock resets them
+        galaxy.enterprise.energy = 1000.0;
+        galaxy.enterprise.shields = 500.0;
+        galaxy.enterprise.torpedoes = 3;
+        // Place Enterprise
+        galaxy
+            .sector_map
+            .set(enterprise_sector, SectorContent::Enterprise);
+        // Place starbase
+        galaxy
+            .sector_map
+            .set(starbase_sector, SectorContent::Starbase);
+        galaxy.sector_map.starbase = Some(starbase_sector);
+        galaxy
+    }
+
+    #[test]
+    fn docking_when_adjacent_horizontally() {
+        let enterprise = SectorPosition { x: 4, y: 4 };
+        let starbase = SectorPosition { x: 5, y: 4 };
+        let mut galaxy = setup_galaxy_with_starbase(enterprise, starbase);
+
+        assert!(galaxy.check_docking());
+        assert_eq!(galaxy.enterprise.energy, INITIAL_ENERGY);
+        assert_eq!(galaxy.enterprise.torpedoes, INITIAL_TORPEDOES);
+        assert_eq!(galaxy.enterprise.shields, INITIAL_SHIELDS);
+    }
+
+    #[test]
+    fn docking_when_adjacent_diagonally() {
+        let enterprise = SectorPosition { x: 3, y: 3 };
+        let starbase = SectorPosition { x: 4, y: 4 };
+        let mut galaxy = setup_galaxy_with_starbase(enterprise, starbase);
+
+        assert!(galaxy.check_docking());
+    }
+
+    #[test]
+    fn no_docking_when_too_far() {
+        let enterprise = SectorPosition { x: 1, y: 1 };
+        let starbase = SectorPosition { x: 4, y: 4 };
+        let mut galaxy = setup_galaxy_with_starbase(enterprise, starbase);
+
+        assert!(!galaxy.check_docking());
+        // Resources should NOT be restored
+        assert_eq!(galaxy.enterprise.energy, 1000.0);
+        assert_eq!(galaxy.enterprise.torpedoes, 3);
+    }
+
+    #[test]
+    fn no_docking_when_no_starbase() {
+        let mut galaxy = Galaxy::new(42);
+        galaxy.sector_map = SectorMap::new();
+        galaxy.enterprise.sector = SectorPosition { x: 4, y: 4 };
+        galaxy
+            .sector_map
+            .set(galaxy.enterprise.sector, SectorContent::Enterprise);
+        // No starbase placed
+
+        assert!(!galaxy.check_docking());
+    }
+
+    #[test]
+    fn docking_when_distance_exactly_one() {
+        // All 8 adjacent positions
+        let base = SectorPosition { x: 4, y: 4 };
+        let adjacent_positions = [
+            SectorPosition { x: 3, y: 3 },
+            SectorPosition { x: 4, y: 3 },
+            SectorPosition { x: 5, y: 3 },
+            SectorPosition { x: 3, y: 4 },
+            SectorPosition { x: 5, y: 4 },
+            SectorPosition { x: 3, y: 5 },
+            SectorPosition { x: 4, y: 5 },
+            SectorPosition { x: 5, y: 5 },
+        ];
+        for pos in &adjacent_positions {
+            let mut galaxy = setup_galaxy_with_starbase(*pos, base);
+            assert!(
+                galaxy.check_docking(),
+                "should dock at ({}, {}) next to base at (4, 4)",
+                pos.x,
+                pos.y
+            );
+        }
+    }
+
+    // ========== Condition evaluation tests ==========
+
+    #[test]
+    fn condition_green_no_klingons_full_energy() {
+        let mut galaxy = Galaxy::new(42);
+        galaxy.sector_map = SectorMap::new();
+        galaxy.enterprise.sector = SectorPosition { x: 4, y: 4 };
+        galaxy
+            .sector_map
+            .set(galaxy.enterprise.sector, SectorContent::Enterprise);
+        galaxy.enterprise.energy = INITIAL_ENERGY;
+
+        assert_eq!(galaxy.evaluate_condition(), Condition::Green);
+    }
+
+    #[test]
+    fn condition_yellow_low_energy() {
+        let mut galaxy = Galaxy::new(42);
+        galaxy.sector_map = SectorMap::new();
+        galaxy.enterprise.sector = SectorPosition { x: 4, y: 4 };
+        galaxy
+            .sector_map
+            .set(galaxy.enterprise.sector, SectorContent::Enterprise);
+        galaxy.enterprise.energy = INITIAL_ENERGY * 0.05; // below 10%
+
+        assert_eq!(galaxy.evaluate_condition(), Condition::Yellow);
+    }
+
+    #[test]
+    fn condition_red_klingons_present() {
+        let mut galaxy = Galaxy::new(42);
+        galaxy.sector_map = SectorMap::new();
+        galaxy.enterprise.sector = SectorPosition { x: 4, y: 4 };
+        galaxy
+            .sector_map
+            .set(galaxy.enterprise.sector, SectorContent::Enterprise);
+        // Add a Klingon
+        let kpos = SectorPosition { x: 1, y: 1 };
+        galaxy.sector_map.set(kpos, SectorContent::Klingon);
+        galaxy
+            .sector_map
+            .klingons
+            .push(crate::models::klingon::Klingon::new(kpos));
+
+        assert_eq!(galaxy.evaluate_condition(), Condition::Red);
+    }
+
+    #[test]
+    fn condition_docked_adjacent_to_starbase() {
+        let enterprise = SectorPosition { x: 4, y: 4 };
+        let starbase = SectorPosition { x: 5, y: 4 };
+        let galaxy = setup_galaxy_with_starbase(enterprise, starbase);
+
+        assert_eq!(galaxy.evaluate_condition(), Condition::Docked);
+    }
+
+    // ========== Short range scan tests ==========
+
+    #[test]
+    fn short_range_scan_does_not_panic() {
+        let mut galaxy = Galaxy::new(42);
+        // Just verify it runs without panicking
+        galaxy.short_range_scan();
+    }
+
+    #[test]
+    fn short_range_scan_blocked_when_sensors_damaged() {
+        let mut galaxy = Galaxy::new(42);
+        galaxy.enterprise.devices[Device::ShortRangeSensors as usize] = -1.0;
+        // Should print damage message and return without panicking
+        galaxy.short_range_scan();
+    }
+
+    #[test]
+    fn render_row_shows_enterprise_symbol() {
+        let galaxy = Galaxy::new(42);
+        let ey = galaxy.enterprise.sector.y;
+        let row = galaxy.sector_map.render_row(ey);
+        assert!(
+            row.contains("<*>"),
+            "row {} should contain Enterprise symbol <*>, got: {}",
+            ey,
+            row
+        );
+    }
+
+    #[test]
+    fn render_row_length_is_24_chars() {
+        let galaxy = Galaxy::new(42);
+        for y in 1..=SECTOR_SIZE as i32 {
+            let row = galaxy.sector_map.render_row(y);
+            assert_eq!(
+                row.len(),
+                SECTOR_SIZE * 3,
+                "row {} should be {} chars, got {}",
+                y,
+                SECTOR_SIZE * 3,
+                row.len()
+            );
+        }
+    }
+}
