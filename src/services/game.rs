@@ -30,8 +30,8 @@ impl Game {
                 "1" => scan::short_range_scan(&mut self.galaxy),
                 "2" => scan::long_range_scan(&mut self.galaxy),
                 "3" => combat::fire_phasers(&mut self.galaxy),
-                "4" => println!("NOT YET IMPLEMENTED"),
-                "5" => println!("NOT YET IMPLEMENTED"),
+                "4" => combat::fire_torpedoes(&mut self.galaxy),
+                "5" => combat::shield_control(&mut self.galaxy),
                 "6" => self.galaxy.enterprise.damage_report(),
                 "7" => computer::library_computer(&mut self.galaxy),
                 "q" | "Q" => {

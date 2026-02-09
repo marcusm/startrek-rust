@@ -244,6 +244,12 @@ impl Galaxy {
         self.quadrants[(q.y - 1) as usize][(q.x - 1) as usize].klingons -= 1;
     }
 
+    /// Update the quadrant's starbase count after removing one.
+    pub fn decrement_quadrant_starbases(&mut self) {
+        let q = self.enterprise.quadrant;
+        self.quadrants[(q.y - 1) as usize][(q.x - 1) as usize].starbases -= 1;
+    }
+
 }
 
 #[cfg(test)]

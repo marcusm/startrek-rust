@@ -3,8 +3,10 @@ use std::io::{self, Write};
 use rand::Rng;
 
 use crate::models::constants::{Device, SectorContent};
+use crate::models::enterprise::ShieldControlError;
 use crate::models::galaxy::Galaxy;
 use crate::models::position::SectorPosition;
+use crate::services::navigation;
 
 /// Calculate the Euclidean distance between two sector positions (spec section 7.1).
 pub fn calculate_distance(from: SectorPosition, to: SectorPosition) -> f64 {
@@ -171,6 +173,164 @@ pub fn fire_phasers(galaxy: &mut Galaxy) {
     check_phaser_victory(galaxy);
 }
 
+/// Check preconditions for firing torpedoes (spec section 6.4).
+/// Returns true if ready to fire, false otherwise.
+fn check_torpedo_readiness(galaxy: &Galaxy) -> bool {
+    // Check if photon tubes are damaged
+    if galaxy.enterprise.is_damaged(Device::PhotonTubes) {
+        println!("PHOTON TUBES ARE NOT OPERATIONAL");
+        return false;
+    }
+
+    // Check torpedo count
+    if galaxy.enterprise.torpedoes <= 0 {
+        println!("ALL PHOTON TORPEDOES EXPENDED");
+        return false;
+    }
+
+    true
+}
+
+/// Read and validate torpedo course input (spec section 6.4).
+/// Returns Some(course) if valid, None if cancelled.
+fn read_torpedo_course() -> Option<f64> {
+    loop {
+        let input = read_line("TORPEDO COURSE (1-9)");
+        let course: f64 = match input.trim().parse() {
+            Ok(v) => v,
+            Err(_) => continue, // Invalid input, re-prompt
+        };
+
+        if course == 0.0 {
+            return None; // Cancel command
+        }
+
+        if course >= 1.0 && course < 9.0 {
+            return Some(course);
+        }
+
+        // Out of range (< 1 or >= 9), re-prompt
+    }
+}
+
+/// Handle Klingon hit by torpedo (spec section 6.4).
+fn handle_klingon_hit(galaxy: &mut Galaxy, pos: SectorPosition) {
+    println!("*** KLINGON DESTROYED ***");
+
+    // Remove from sector map
+    galaxy.sector_map.set(pos, SectorContent::Empty);
+
+    // Remove from klingons vector
+    galaxy.sector_map.klingons.retain(|k| k.sector != pos);
+
+    // Update global count
+    galaxy.total_klingons -= 1;
+
+    // Update quadrant data
+    galaxy.decrement_quadrant_klingons();
+
+    // Check victory condition
+    if galaxy.is_victory() {
+        galaxy.end_victory();
+    }
+}
+
+/// Handle starbase hit by torpedo (spec section 6.4).
+fn handle_starbase_hit(galaxy: &mut Galaxy, pos: SectorPosition) {
+    println!("*** STAR BASE DESTROYED ***  .......CONGRATULATIONS");
+
+    // Clear from sector map
+    galaxy.sector_map.set(pos, SectorContent::Empty);
+    galaxy.sector_map.starbase = None;
+
+    // Update global count
+    galaxy.total_starbases -= 1;
+
+    // Update quadrant data
+    galaxy.decrement_quadrant_starbases();
+}
+
+/// Fire torpedo along trajectory and check for hits (spec section 6.4).
+fn fire_torpedo_trajectory(galaxy: &mut Galaxy, course: f64) {
+    // Calculate direction vector using navigation's interpolation
+    let (dx, dy) = navigation::calculate_direction(course);
+
+    // Start from Enterprise position (floating point for interpolation)
+    let mut x = galaxy.enterprise.sector.x as f64;
+    let mut y = galaxy.enterprise.sector.y as f64;
+
+    println!("TORPEDO TRACK:");
+
+    // Travel sector-by-sector
+    loop {
+        x += dx;
+        y += dy;
+
+        // Boundary check: outside quadrant?
+        if x < 0.5 || x >= 8.5 || y < 0.5 || y >= 8.5 {
+            println!("TORPEDO MISSED");
+            return;
+        }
+
+        // Print current position as truncated integers
+        println!("{},{}", x as i32, y as i32);
+
+        // Check sector at rounded position
+        let check_x = (x + 0.5).floor() as i32;
+        let check_y = (y + 0.5).floor() as i32;
+        let check_pos = SectorPosition {
+            x: check_x,
+            y: check_y,
+        };
+
+        // Check what's in this sector
+        match galaxy.sector_map.get(check_pos) {
+            SectorContent::Empty => continue, // Keep traveling
+            SectorContent::Klingon => {
+                handle_klingon_hit(galaxy, check_pos);
+                return;
+            }
+            SectorContent::Star => {
+                println!("YOU CAN'T DESTROY STARS SILLY");
+                return;
+            }
+            SectorContent::Starbase => {
+                handle_starbase_hit(galaxy, check_pos);
+                return;
+            }
+            SectorContent::Enterprise => {
+                // Should never happen, but handle gracefully
+                return;
+            }
+        }
+    }
+}
+
+/// Fire Photon Torpedoes — Command 4 (spec section 6.4).
+pub fn fire_torpedoes(galaxy: &mut Galaxy) {
+    // Phase 1: Check preconditions
+    if !check_torpedo_readiness(galaxy) {
+        return;
+    }
+
+    // Phase 2: Get course input (0 = cancel)
+    let course = match read_torpedo_course() {
+        Some(c) => c,
+        None => return,
+    };
+
+    // Phase 3: Deduct torpedo BEFORE firing (spec step 2)
+    galaxy.enterprise.torpedoes -= 1;
+
+    // Phase 4: Fire along trajectory
+    fire_torpedo_trajectory(galaxy, course);
+
+    // Phase 5: Klingons fire back (after torpedo resolution, spec 8.1)
+    if klingons_fire(galaxy) {
+        return; // Enterprise destroyed
+    }
+}
+
 /// Klingons attack the Enterprise (spec section 8).
 /// Returns true if the Enterprise is destroyed, false otherwise.
 pub fn klingons_fire(galaxy: &mut Galaxy) -> bool {
@@ -212,6 +372,49 @@ pub fn klingons_fire(galaxy: &mut Galaxy) -> bool {
     }
 
     false
+}
+
+/// Shield control command (Command 5, spec section 6.5).
+/// Allows the player to transfer energy between shields and main energy reserves.
+pub fn shield_control(galaxy: &mut Galaxy) {
+    // Check if shield control is damaged (spec section 6.5)
+    if galaxy.enterprise.is_damaged(Device::ShieldControl) {
+        println!("SHIELD CONTROL IS NON-OPERATIONAL");
+        return;
+    }
+
+    // Display available energy (energy + shields)
+    let total_energy = galaxy.enterprise.energy + galaxy.enterprise.shields;
+    println!("ENERGY AVAILABLE = {}", total_energy as i32);
+
+    // Prompt for input
+    let input = read_line("NUMBER OF UNITS TO SHIELDS");
+    let units: f64 = match input.trim().parse() {
+        Ok(v) => v,
+        Err(_) => return, // Invalid parse, return to command prompt
+    };
+
+    // If input ≤ 0, return to command prompt (spec section 6.5)
+    if units <= 0.0 {
+        return;
+    }
+
+    // Attempt to transfer energy
+    match galaxy.enterprise.shield_control(units) {
+        Ok(()) => {
+            // Success - energy transferred, return to command prompt
+        }
+        Err(ShieldControlError::InsufficientEnergy) => {
+            // Re-prompt by calling shield_control recursively
+            shield_control(galaxy);
+        }
+        Err(ShieldControlError::InvalidInput) => {
+            // Return to command prompt
+        }
+        Err(ShieldControlError::SystemDamaged) => {
+            // Should never happen - we checked above
+        }
+    }
 }
 
 fn read_line(prompt: &str) -> String {
@@ -463,6 +666,259 @@ mod tests {
 
         // Verify grid is cleared and vector is empty
         assert_eq!(galaxy.sector_map.get(klingon_pos), SectorContent::Empty);
+        assert_eq!(galaxy.sector_map.klingons.len(), 0);
+    }
+
+    // ========== Torpedo tests ==========
+
+    #[test]
+    fn torpedo_readiness_blocked_when_tubes_damaged() {
+        let mut galaxy = setup_combat_scenario(42, 3000.0, 500.0, 200.0);
+        galaxy.enterprise.devices[Device::PhotonTubes as usize] = -2.0;
+
+        assert!(!check_torpedo_readiness(&galaxy));
+    }
+
+    #[test]
+    fn torpedo_readiness_blocked_when_no_torpedoes() {
+        let mut galaxy = setup_combat_scenario(42, 3000.0, 500.0, 200.0);
+        galaxy.enterprise.torpedoes = 0;
+
+        assert!(!check_torpedo_readiness(&galaxy));
+    }
+
+    #[test]
+    fn torpedo_readiness_ok_when_ready() {
+        let galaxy = setup_combat_scenario(42, 3000.0, 500.0, 200.0);
+        assert!(check_torpedo_readiness(&galaxy));
+    }
+
+    #[test]
+    fn torpedo_destroys_klingon_going_east() {
+        let mut galaxy = setup_combat_scenario(42, 3000.0, 500.0, 200.0);
+        galaxy.total_klingons = 1;
+
+        // Enterprise at (4,4), place Klingon at (6,4) - east
+        galaxy.sector_map.klingons.clear();
+        let klingon_pos = SectorPosition { x: 6, y: 4 };
+        let klingon = Klingon::new(klingon_pos);
+        galaxy.sector_map.set(klingon_pos, SectorContent::Klingon);
+        galaxy.sector_map.klingons.push(klingon);
+
+        // Fire torpedo east (course 1.0)
+        fire_torpedo_trajectory(&mut galaxy, 1.0);
+
+        // Verify Klingon destroyed
+        assert_eq!(galaxy.sector_map.klingons.len(), 0);
+        assert_eq!(galaxy.sector_map.get(klingon_pos), SectorContent::Empty);
+        assert_eq!(galaxy.total_klingons, 0);
+    }
+
+    #[test]
+    fn torpedo_blocked_by_star() {
+        let mut galaxy = setup_combat_scenario(42, 3000.0, 500.0, 200.0);
+
+        // Place star at (5,4) between Enterprise and Klingon
+        let star_pos = SectorPosition { x: 5, y: 4 };
+        galaxy.sector_map.set(star_pos, SectorContent::Star);
+
+        // Place Klingon further east at (7,4)
+        galaxy.sector_map.klingons.clear();
+        let klingon_pos = SectorPosition { x: 7, y: 4 };
+        let klingon = Klingon::new(klingon_pos);
+        galaxy.sector_map.set(klingon_pos, SectorContent::Klingon);
+        galaxy.sector_map.klingons.push(klingon);
+
+        // Fire torpedo east (course 1.0)
+        fire_torpedo_trajectory(&mut galaxy, 1.0);
+
+        // Verify star stopped torpedo, Klingon still alive
+        assert_eq!(galaxy.sector_map.get(star_pos), SectorContent::Star);
+        assert_eq!(galaxy.sector_map.klingons.len(), 1);
+        assert_eq!(
+            galaxy.sector_map.get(klingon_pos),
+            SectorContent::Klingon
+        );
+    }
+
+    #[test]
+    fn torpedo_destroys_starbase() {
+        let mut galaxy = setup_combat_scenario(42, 3000.0, 500.0, 200.0);
+        galaxy.total_starbases = 1;
+
+        // Place starbase at (5,4) - east of Enterprise
+        let starbase_pos = SectorPosition { x: 5, y: 4 };
+        galaxy.sector_map.set(starbase_pos, SectorContent::Starbase);
+        galaxy.sector_map.starbase = Some(starbase_pos);
+
+        // Fire torpedo east (course 1.0)
+        fire_torpedo_trajectory(&mut galaxy, 1.0);
+
+        // Verify starbase destroyed
+        assert_eq!(galaxy.sector_map.starbase, None);
+        assert_eq!(galaxy.sector_map.get(starbase_pos), SectorContent::Empty);
+        assert_eq!(galaxy.total_starbases, 0);
+    }
+
+    #[test]
+    fn torpedo_misses_at_boundary() {
+        let mut galaxy = setup_combat_scenario(42, 3000.0, 500.0, 200.0);
+        galaxy.sector_map.klingons.clear(); // No obstacles
+
+        // Fire torpedo north (course 3.0) which will exit quadrant
+        fire_torpedo_trajectory(&mut galaxy, 3.0);
+
+        // Torpedo should miss (no crash, just returns)
+        // Can't verify output but should not panic
+    }
+
+    #[test]
+    fn torpedo_travels_through_empty_sectors() {
+        let mut galaxy = setup_combat_scenario(42, 3000.0, 500.0, 200.0);
+
+        // Place Klingon far to the east at (8,4)
+        galaxy.sector_map.klingons.clear();
+        let klingon_pos = SectorPosition { x: 8, y: 4 };
+        let klingon = Klingon::new(klingon_pos);
+        galaxy.sector_map.set(klingon_pos, SectorContent::Klingon);
+        galaxy.sector_map.klingons.push(klingon);
+
+        // Fire torpedo east (course 1.0) - should travel through (5,4), (6,4), (7,4)
+        fire_torpedo_trajectory(&mut galaxy, 1.0);
+
+        // Verify Klingon destroyed at the end of path
+        assert_eq!(galaxy.sector_map.klingons.len(), 0);
+        assert_eq!(galaxy.total_klingons, 0);
+    }
+
+    #[test]
+    fn torpedo_fractional_course_northeast() {
+        let mut galaxy = setup_combat_scenario(42, 3000.0, 500.0, 200.0);
+
+        // Enterprise at (4,4), place Klingon northeast at (6,2)
+        galaxy.sector_map.klingons.clear();
+        let klingon_pos = SectorPosition { x: 6, y: 2 };
+        let klingon = Klingon::new(klingon_pos);
+        galaxy.sector_map.set(klingon_pos, SectorContent::Klingon);
+        galaxy.sector_map.klingons.push(klingon);
+
+        // Fire torpedo northeast with fractional course (course 2.0 is pure northeast)
+        fire_torpedo_trajectory(&mut galaxy, 2.0);
+
+        // Verify Klingon destroyed
+        assert_eq!(galaxy.sector_map.klingons.len(), 0);
+    }
+
+    #[test]
+    fn torpedo_stops_at_first_entity() {
+        let mut galaxy = setup_combat_scenario(42, 3000.0, 500.0, 200.0);
+
+        // Place star at (5,4) and Klingon at (7,4)
+        let star_pos = SectorPosition { x: 5, y: 4 };
+        galaxy.sector_map.set(star_pos, SectorContent::Star);
+
+        galaxy.sector_map.klingons.clear();
+        let klingon_pos = SectorPosition { x: 7, y: 4 };
+        let klingon = Klingon::new(klingon_pos);
+        galaxy.sector_map.set(klingon_pos, SectorContent::Klingon);
+        galaxy.sector_map.klingons.push(klingon);
+
+        // Fire east (course 1.0)
+        fire_torpedo_trajectory(&mut galaxy, 1.0);
+
+        // Star should stop torpedo, Klingon survives
+        assert_eq!(galaxy.sector_map.get(star_pos), SectorContent::Star);
+        assert_eq!(galaxy.sector_map.klingons.len(), 1);
+    }
+
+    #[test]
+    fn torpedo_victory_when_last_klingon_destroyed() {
+        let mut galaxy = setup_combat_scenario(42, 3000.0, 500.0, 200.0);
+        galaxy.total_klingons = 1; // Last Klingon in galaxy
+
+        // Place Klingon at (6,4)
+        galaxy.sector_map.klingons.clear();
+        let klingon_pos = SectorPosition { x: 6, y: 4 };
+        let klingon = Klingon::new(klingon_pos);
+        galaxy.sector_map.set(klingon_pos, SectorContent::Klingon);
+        galaxy.sector_map.klingons.push(klingon);
+
+        // Note: handle_klingon_hit calls end_victory() which exits,
+        // so we can't directly test this without mocking.
+        // This test verifies the setup is correct for victory.
+        assert_eq!(galaxy.total_klingons, 1);
+        assert!(!galaxy.is_victory());
+
+        // Manually destroy to verify is_victory() works
+        galaxy.total_klingons = 0;
+        assert!(galaxy.is_victory());
+    }
+
+    #[test]
+    fn torpedo_course_1_goes_east() {
+        let mut galaxy = setup_combat_scenario(42, 3000.0, 500.0, 200.0);
+
+        // Place Klingon directly east
+        galaxy.sector_map.klingons.clear();
+        let klingon_pos = SectorPosition { x: 7, y: 4 };
+        let klingon = Klingon::new(klingon_pos);
+        galaxy.sector_map.set(klingon_pos, SectorContent::Klingon);
+        galaxy.sector_map.klingons.push(klingon);
+
+        fire_torpedo_trajectory(&mut galaxy, 1.0);
+
+        // Klingon should be destroyed
+        assert_eq!(galaxy.sector_map.klingons.len(), 0);
+    }
+
+    #[test]
+    fn torpedo_course_3_goes_north() {
+        let mut galaxy = setup_combat_scenario(42, 3000.0, 500.0, 200.0);
+
+        // Place Klingon directly north
+        galaxy.sector_map.klingons.clear();
+        let klingon_pos = SectorPosition { x: 4, y: 2 };
+        let klingon = Klingon::new(klingon_pos);
+        galaxy.sector_map.set(klingon_pos, SectorContent::Klingon);
+        galaxy.sector_map.klingons.push(klingon);
+
+        fire_torpedo_trajectory(&mut galaxy, 3.0);
+
+        // Klingon should be destroyed
+        assert_eq!(galaxy.sector_map.klingons.len(), 0);
+    }
+
+    #[test]
+    fn torpedo_course_5_goes_west() {
+        let mut galaxy = setup_combat_scenario(42, 3000.0, 500.0, 200.0);
+
+        // Place Klingon directly west
+        galaxy.sector_map.klingons.clear();
+        let klingon_pos = SectorPosition { x: 2, y: 4 };
+        let klingon = Klingon::new(klingon_pos);
+        galaxy.sector_map.set(klingon_pos, SectorContent::Klingon);
+        galaxy.sector_map.klingons.push(klingon);
+
+        fire_torpedo_trajectory(&mut galaxy, 5.0);
+
+        // Klingon should be destroyed
+        assert_eq!(galaxy.sector_map.klingons.len(), 0);
+    }
+
+    #[test]
+    fn torpedo_course_7_goes_south() {
+        let mut galaxy = setup_combat_scenario(42, 3000.0, 500.0, 200.0);
+
+        // Place Klingon directly south
+        galaxy.sector_map.klingons.clear();
+        let klingon_pos = SectorPosition { x: 4, y: 6 };
+        let klingon = Klingon::new(klingon_pos);
+        galaxy.sector_map.set(klingon_pos, SectorContent::Klingon);
+        galaxy.sector_map.klingons.push(klingon);
+
+        fire_torpedo_trajectory(&mut galaxy, 7.0);
+
+        // Klingon should be destroyed
         assert_eq!(galaxy.sector_map.klingons.len(), 0);
     }
 }
