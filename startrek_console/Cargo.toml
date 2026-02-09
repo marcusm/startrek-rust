@@ -1,7 +1,0 @@
-[package]
-name = "startrek_console"
-version = "0.1.0"
-edition = "2024"
-
-[dependencies]
-startrek_lib = { path = "../startrek_lib" }

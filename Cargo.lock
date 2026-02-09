@@ -3,12 +3,5 @@
 version = 4
 
 [[package]]
-name = "startrek_console"
-version = "0.1.0"
-dependencies = [
- "startrek_lib",
-]
-
-[[package]]
-name = "startrek_lib"
+name = "startrek"
 version = "0.1.0"
