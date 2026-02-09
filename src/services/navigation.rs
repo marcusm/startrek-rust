@@ -3,6 +3,7 @@ use std::io::{self, Write};
 use crate::models::constants::{COURSE_VECTORS, Device, SectorContent};
 use crate::models::galaxy::Galaxy;
 use crate::models::position::{QuadrantPosition, SectorPosition};
+use crate::services::combat;
 
 /// Warp Engine Control — Command 0 (spec section 5.1).
 pub fn navigate(galaxy: &mut Galaxy) {
@@ -11,8 +12,12 @@ pub fn navigate(galaxy: &mut Galaxy) {
         None => return,
     };
 
-    // TODO: If Klingons present in quadrant, they fire before warp move (Section 8.1).
-    // TODO: If Enterprise destroyed by Klingon fire, end game.
+    // If Klingons present, they fire before warp move (spec section 8.1)
+    if !galaxy.sector_map.klingons.is_empty() {
+        if combat::klingons_fire(galaxy) {
+            return; // Enterprise destroyed, game ended
+        }
+    }
 
     // Energy/shields check (no-Klingons path, spec section 10.4)
     if galaxy.enterprise.energy <= 0.0 {
@@ -33,9 +38,6 @@ pub fn navigate(galaxy: &mut Galaxy) {
             return; // Prevent movement
         }
     }
-
-    // TODO: Automatic repair — each damaged device D[i] += 1 (Section 5.2).
-    // TODO: Random damage/repair events — 20% chance (Section 5.3).
 
     execute_move(galaxy, course, warp_factor);
 }
@@ -239,6 +241,12 @@ fn execute_move(galaxy: &mut Galaxy, course: f64, warp_factor: f64) {
 
     // Energy cost: N - 5 (short moves can gain energy)
     galaxy.enterprise.energy -= (n - 5) as f64;
+
+    // Automatic repair (spec section 5.2)
+    auto_repair_devices(galaxy);
+
+    // Random damage/repair events - 20% chance (spec section 5.3)
+    random_damage_event(galaxy);
 }
 
 /// Check if the time limit has been exceeded and end the game if so (spec section 10.3).
@@ -253,6 +261,52 @@ fn check_time_limit(galaxy: &Galaxy) {
         );
         std::process::exit(0);
     }
+}
+
+/// Automatic device repair on navigation moves (spec section 5.2).
+/// Each damaged device (value < 0) is incremented by 1.
+fn auto_repair_devices(galaxy: &mut Galaxy) {
+    for device_value in galaxy.enterprise.devices.iter_mut() {
+        if *device_value < 0.0 {
+            *device_value += 1.0;
+        }
+    }
+}
+
+/// Random damage/repair events on navigation moves (spec section 5.3).
+/// 20% chance of event affecting a random device.
+fn random_damage_event(galaxy: &mut Galaxy) {
+    use rand::Rng;
+    let mut rng = rand::thread_rng();
+
+    // 20% chance of event
+    if rng.gen::<f64>() > 0.2 {
+        return;
+    }
+
+    // Select random device (0-7 index)
+    let device_index = (rng.gen::<f64>() * 8.0).floor() as usize;
+
+    // Determine severity (1-5)
+    let severity = (rng.gen::<f64>() * 5.0).floor() + 1.0;
+
+    // 50% chance of damage vs repair
+    let is_repair = rng.gen::<f64>() >= 0.5;
+
+    let device = Device::ALL[device_index];
+
+    println!();
+    if is_repair {
+        galaxy.enterprise.devices[device_index] += severity;
+        println!(
+            "DAMAGE CONTROL REPORT: {} STATE OF REPAIR IMPROVED",
+            device.name()
+        );
+    } else {
+        galaxy.enterprise.devices[device_index] -= severity;
+        println!("DAMAGE CONTROL REPORT: {} DAMAGED", device.name());
+    }
+    println!();
 }
 
 fn read_line(prompt: &str) -> String {
