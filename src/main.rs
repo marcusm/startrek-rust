@@ -3,11 +3,12 @@ mod models;
 mod services;
 
 fn main() {
+    let args = cli::args::parse();
+
     println!("*** STAR TREK ***");
     println!();
 
-    // Future: prompt for seed ("ENTER SEED NUMBER")
-    let seed: u64 = 0;
+    let seed: u64 = args.seed.unwrap_or(0);
 
     println!("INITIALIZING...");
     let mut game = services::game::Game::new(seed);
