@@ -1,0 +1,6 @@
+[workspace]
+members = [
+    "startrek_lib",
+    "startrek_console",
+]
+resolver = "2"
