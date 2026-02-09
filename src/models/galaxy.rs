@@ -1,7 +1,7 @@
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 
-use super::constants::{Condition, Device, GALAXY_SIZE, INITIAL_ENERGY, MISSION_DURATION, SECTOR_SIZE, SectorContent};
+use super::constants::{Condition, GALAXY_SIZE, INITIAL_ENERGY, MISSION_DURATION, SectorContent};
 use super::enterprise::Enterprise;
 use super::klingon::Klingon;
 use super::position::{QuadrantPosition, SectorPosition};
@@ -171,25 +171,13 @@ impl Galaxy {
     /// Check if the Enterprise is adjacent to a starbase and dock if so.
     /// Returns true if docked (spec section 9.1-9.2).
     pub fn check_docking(&mut self) -> bool {
-        if let Some(base) = self.sector_map.starbase {
-            let es = self.enterprise.sector;
-            if (es.x - base.x).abs() <= 1 && (es.y - base.y).abs() <= 1 {
-                self.enterprise.dock();
-                println!("SHIELDS DROPPED FOR DOCKING PURPOSES");
-                return true;
-            }
-        }
-        false
+        self.enterprise.check_docking(self.sector_map.starbase)
     }
 
     /// Evaluate the ship's condition code (spec section 9.4).
     pub fn evaluate_condition(&self) -> Condition {
-        // Check docking adjacency (without side effects)
-        if let Some(base) = self.sector_map.starbase {
-            let es = self.enterprise.sector;
-            if (es.x - base.x).abs() <= 1 && (es.y - base.y).abs() <= 1 {
-                return Condition::Docked;
-            }
+        if self.enterprise.is_adjacent_to_starbase(self.sector_map.starbase) {
+            return Condition::Docked;
         }
 
         if !self.sector_map.klingons.is_empty() {
@@ -201,48 +189,13 @@ impl Galaxy {
         }
     }
 
-    /// Short Range Sensor Scan — Command 1 (spec section 6.1).
-    pub fn short_range_scan(&mut self) {
-        self.check_docking();
-        let condition = self.evaluate_condition();
-
-        if self.enterprise.is_damaged(Device::ShortRangeSensors) {
-            println!("*** SHORT RANGE SENSORS ARE OUT ***");
-            return;
-        }
-
-        let border = "-=--=--=--=--=--=--=--=-";
-        let e = &self.enterprise;
-        let status: [String; SECTOR_SIZE] = [
-            format!("STARDATE  {}", self.stardate as i32),
-            format!("CONDITION {}", condition.label()),
-            format!("QUADRANT  {},{}", e.quadrant.x, e.quadrant.y),
-            format!("SECTOR    {},{}", e.sector.x, e.sector.y),
-            format!("ENERGY    {}", e.energy as i32),
-            format!("SHIELDS   {}", e.shields as i32),
-            format!("PHOTON TORPEDOES {}", e.torpedoes),
-            String::new(),
-        ];
-
-        println!("{}", border);
-        for y in 1..=SECTOR_SIZE as i32 {
-            let row = self.sector_map.render_row(y);
-            let idx = (y - 1) as usize;
-            if !status[idx].is_empty() {
-                println!("{}        {}", row, status[idx]);
-            } else {
-                println!("{}", row);
-            }
-        }
-        println!("{}", border);
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::models::constants::{
-        Condition, Device, GALAXY_SIZE, INITIAL_ENERGY, INITIAL_SHIELDS, INITIAL_TORPEDOES,
+        Condition, GALAXY_SIZE, INITIAL_ENERGY, INITIAL_SHIELDS, INITIAL_TORPEDOES,
         MISSION_DURATION, SECTOR_SIZE, SectorContent,
     };
 
@@ -426,103 +379,7 @@ mod tests {
         assert!(!same, "different seeds should produce different state");
     }
 
-    // ========== Check docking tests ==========
 
-    /// Helper: set up a galaxy with a starbase at a known position.
-    fn setup_galaxy_with_starbase(
-        enterprise_sector: SectorPosition,
-        starbase_sector: SectorPosition,
-    ) -> Galaxy {
-        let mut galaxy = Galaxy::new(42);
-        // Clear sector map
-        galaxy.sector_map = SectorMap::new();
-        galaxy.enterprise.sector = enterprise_sector;
-        // Drain some energy/shields so we can verify dock resets them
-        galaxy.enterprise.energy = 1000.0;
-        galaxy.enterprise.shields = 500.0;
-        galaxy.enterprise.torpedoes = 3;
-        // Place Enterprise
-        galaxy
-            .sector_map
-            .set(enterprise_sector, SectorContent::Enterprise);
-        // Place starbase
-        galaxy
-            .sector_map
-            .set(starbase_sector, SectorContent::Starbase);
-        galaxy.sector_map.starbase = Some(starbase_sector);
-        galaxy
-    }
-
-    #[test]
-    fn docking_when_adjacent_horizontally() {
-        let enterprise = SectorPosition { x: 4, y: 4 };
-        let starbase = SectorPosition { x: 5, y: 4 };
-        let mut galaxy = setup_galaxy_with_starbase(enterprise, starbase);
-
-        assert!(galaxy.check_docking());
-        assert_eq!(galaxy.enterprise.energy, INITIAL_ENERGY);
-        assert_eq!(galaxy.enterprise.torpedoes, INITIAL_TORPEDOES);
-        assert_eq!(galaxy.enterprise.shields, INITIAL_SHIELDS);
-    }
-
-    #[test]
-    fn docking_when_adjacent_diagonally() {
-        let enterprise = SectorPosition { x: 3, y: 3 };
-        let starbase = SectorPosition { x: 4, y: 4 };
-        let mut galaxy = setup_galaxy_with_starbase(enterprise, starbase);
-
-        assert!(galaxy.check_docking());
-    }
-
-    #[test]
-    fn no_docking_when_too_far() {
-        let enterprise = SectorPosition { x: 1, y: 1 };
-        let starbase = SectorPosition { x: 4, y: 4 };
-        let mut galaxy = setup_galaxy_with_starbase(enterprise, starbase);
-
-        assert!(!galaxy.check_docking());
-        // Resources should NOT be restored
-        assert_eq!(galaxy.enterprise.energy, 1000.0);
-        assert_eq!(galaxy.enterprise.torpedoes, 3);
-    }
-
-    #[test]
-    fn no_docking_when_no_starbase() {
-        let mut galaxy = Galaxy::new(42);
-        galaxy.sector_map = SectorMap::new();
-        galaxy.enterprise.sector = SectorPosition { x: 4, y: 4 };
-        galaxy
-            .sector_map
-            .set(galaxy.enterprise.sector, SectorContent::Enterprise);
-        // No starbase placed
-
-        assert!(!galaxy.check_docking());
-    }
-
-    #[test]
-    fn docking_when_distance_exactly_one() {
-        // All 8 adjacent positions
-        let base = SectorPosition { x: 4, y: 4 };
-        let adjacent_positions = [
-            SectorPosition { x: 3, y: 3 },
-            SectorPosition { x: 4, y: 3 },
-            SectorPosition { x: 5, y: 3 },
-            SectorPosition { x: 3, y: 4 },
-            SectorPosition { x: 5, y: 4 },
-            SectorPosition { x: 3, y: 5 },
-            SectorPosition { x: 4, y: 5 },
-            SectorPosition { x: 5, y: 5 },
-        ];
-        for pos in &adjacent_positions {
-            let mut galaxy = setup_galaxy_with_starbase(*pos, base);
-            assert!(
-                galaxy.check_docking(),
-                "should dock at ({}, {}) next to base at (4, 4)",
-                pos.x,
-                pos.y
-            );
-        }
-    }
 
     // ========== Condition evaluation tests ==========
 
@@ -571,6 +428,24 @@ mod tests {
         assert_eq!(galaxy.evaluate_condition(), Condition::Red);
     }
 
+    /// Helper: set up a galaxy with a starbase at a known position.
+    fn setup_galaxy_with_starbase(
+        enterprise_sector: SectorPosition,
+        starbase_sector: SectorPosition,
+    ) -> Galaxy {
+        let mut galaxy = Galaxy::new(42);
+        galaxy.sector_map = SectorMap::new();
+        galaxy.enterprise.sector = enterprise_sector;
+        galaxy
+            .sector_map
+            .set(enterprise_sector, SectorContent::Enterprise);
+        galaxy
+            .sector_map
+            .set(starbase_sector, SectorContent::Starbase);
+        galaxy.sector_map.starbase = Some(starbase_sector);
+        galaxy
+    }
+
     #[test]
     fn condition_docked_adjacent_to_starbase() {
         let enterprise = SectorPosition { x: 4, y: 4 };
@@ -578,23 +453,6 @@ mod tests {
         let galaxy = setup_galaxy_with_starbase(enterprise, starbase);
 
         assert_eq!(galaxy.evaluate_condition(), Condition::Docked);
-    }
-
-    // ========== Short range scan tests ==========
-
-    #[test]
-    fn short_range_scan_does_not_panic() {
-        let mut galaxy = Galaxy::new(42);
-        // Just verify it runs without panicking
-        galaxy.short_range_scan();
-    }
-
-    #[test]
-    fn short_range_scan_blocked_when_sensors_damaged() {
-        let mut galaxy = Galaxy::new(42);
-        galaxy.enterprise.devices[Device::ShortRangeSensors as usize] = -1.0;
-        // Should print damage message and return without panicking
-        galaxy.short_range_scan();
     }
 
     #[test]

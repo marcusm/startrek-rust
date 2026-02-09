@@ -2,6 +2,7 @@ use std::io::{self, Write};
 
 use crate::models::galaxy::Galaxy;
 use crate::services::navigation;
+use crate::services::scan;
 
 pub struct Game {
     pub galaxy: Galaxy,
@@ -16,7 +17,7 @@ impl Game {
 
     pub fn run(&mut self) {
         self.print_mission_briefing();
-        self.galaxy.short_range_scan();
+        scan::short_range_scan(&mut self.galaxy);
 
         loop {
             let input = Self::read_line("COMMAND");
@@ -24,7 +25,7 @@ impl Game {
 
             match input {
                 "0" => navigation::navigate(&mut self.galaxy),
-                "1" => self.galaxy.short_range_scan(),
+                "1" => scan::short_range_scan(&mut self.galaxy),
                 "2" => println!("NOT YET IMPLEMENTED"),
                 "3" => println!("NOT YET IMPLEMENTED"),
                 "4" => println!("NOT YET IMPLEMENTED"),
