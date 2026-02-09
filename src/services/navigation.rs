@@ -204,6 +204,12 @@ fn execute_move(galaxy: &mut Galaxy, course: f64, warp_factor: f64) {
         galaxy.enterprise.sector = new_sector;
         galaxy.enter_quadrant();
 
+        // Record the new quadrant to computer memory
+        galaxy.record_quadrant_to_memory(
+            galaxy.enterprise.quadrant.x,
+            galaxy.enterprise.quadrant.y,
+        );
+
         // Boundary crossing always advances stardate by 1
         galaxy.stardate += 1.0;
     } else {

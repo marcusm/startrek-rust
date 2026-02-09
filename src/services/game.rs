@@ -1,6 +1,7 @@
 use std::io::{self, Write};
 
 use crate::models::galaxy::Galaxy;
+use crate::services::computer;
 use crate::services::navigation;
 use crate::services::scan;
 
@@ -26,12 +27,12 @@ impl Game {
             match input {
                 "0" => navigation::navigate(&mut self.galaxy),
                 "1" => scan::short_range_scan(&mut self.galaxy),
-                "2" => println!("NOT YET IMPLEMENTED"),
+                "2" => scan::long_range_scan(&mut self.galaxy),
                 "3" => println!("NOT YET IMPLEMENTED"),
                 "4" => println!("NOT YET IMPLEMENTED"),
                 "5" => println!("NOT YET IMPLEMENTED"),
                 "6" => println!("NOT YET IMPLEMENTED"),
-                "7" => println!("NOT YET IMPLEMENTED"),
+                "7" => computer::library_computer(&mut self.galaxy),
                 "q" | "Q" => {
                     println!("GOODBYE, CAPTAIN.");
                     break;

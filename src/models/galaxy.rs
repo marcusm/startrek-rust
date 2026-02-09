@@ -1,7 +1,9 @@
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 
-use super::constants::{Condition, GALAXY_SIZE, INITIAL_ENERGY, MISSION_DURATION, SectorContent};
+use super::constants::{
+    Condition, Device, GALAXY_SIZE, INITIAL_ENERGY, MISSION_DURATION, SectorContent,
+};
 use super::enterprise::Enterprise;
 use super::klingon::Klingon;
 use super::position::{QuadrantPosition, SectorPosition};
@@ -15,7 +17,7 @@ pub struct Galaxy {
     pub mission_duration: f64,
     /// 8x8 grid of quadrant data. Internal 0-based: quadrants[y-1][x-1].
     pub quadrants: [[QuadrantData; GALAXY_SIZE]; GALAXY_SIZE],
-    /// Computer's knowledge of the galaxy. Starts all zeros, populated by LRS.
+    /// Computer's knowledge of the galaxy. -1 = unscanned, otherwise encoded quadrant data.
     pub computer_memory: [[i32; GALAXY_SIZE]; GALAXY_SIZE],
     pub total_klingons: i32,
     pub total_starbases: i32,
@@ -51,7 +53,7 @@ impl Galaxy {
             starting_stardate,
             mission_duration: MISSION_DURATION,
             quadrants,
-            computer_memory: [[0; GALAXY_SIZE]; GALAXY_SIZE],
+            computer_memory: [[-1; GALAXY_SIZE]; GALAXY_SIZE],
             total_klingons,
             total_starbases,
             initial_klingons: total_klingons,
@@ -62,6 +64,12 @@ impl Galaxy {
 
         // Enter the starting quadrant (populates sector map)
         galaxy.enter_quadrant();
+
+        // Record starting quadrant to computer memory
+        galaxy.record_quadrant_to_memory(
+            galaxy.enterprise.quadrant.x,
+            galaxy.enterprise.quadrant.y,
+        );
 
         galaxy
     }
@@ -172,6 +180,18 @@ impl Galaxy {
     /// Returns true if docked (spec section 9.1-9.2).
     pub fn check_docking(&mut self) -> bool {
         self.enterprise.check_docking(self.sector_map.starbase)
+    }
+
+    /// Record a quadrant's data into computer memory.
+    /// Does nothing if the Computer device is damaged or coordinates are out of range.
+    pub fn record_quadrant_to_memory(&mut self, x: i32, y: i32) {
+        if self.enterprise.is_damaged(Device::Computer) {
+            return;
+        }
+        if x >= 1 && x <= 8 && y >= 1 && y <= 8 {
+            self.computer_memory[(y - 1) as usize][(x - 1) as usize] =
+                self.quadrants[(y - 1) as usize][(x - 1) as usize].encoded();
+        }
     }
 
     /// Evaluate the ship's condition code (spec section 9.4).
@@ -311,11 +331,20 @@ mod tests {
     }
 
     #[test]
-    fn computer_memory_starts_zeroed() {
+    fn computer_memory_starts_unscanned_except_starting_quadrant() {
         let galaxy = Galaxy::new(0);
+        let qx = galaxy.enterprise.quadrant.x;
+        let qy = galaxy.enterprise.quadrant.y;
         for y in 0..GALAXY_SIZE {
             for x in 0..GALAXY_SIZE {
-                assert_eq!(galaxy.computer_memory[y][x], 0);
+                if x == (qx - 1) as usize && y == (qy - 1) as usize {
+                    // Starting quadrant should be recorded
+                    let expected = galaxy.quadrants[y][x].encoded();
+                    assert_eq!(galaxy.computer_memory[y][x], expected);
+                } else {
+                    // All other quadrants should be unscanned
+                    assert_eq!(galaxy.computer_memory[y][x], -1);
+                }
             }
         }
     }
