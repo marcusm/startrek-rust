@@ -69,7 +69,7 @@ fn status_report(galaxy: &Galaxy) {
 fn photon_torpedo_data(galaxy: &Galaxy) {
     // Display data for each living Klingon
     for klingon in &galaxy.sector_map.klingons {
-        if klingon.shields <= 0.0 {
+        if !klingon.is_alive() {
             continue; // Skip dead Klingons
         }
 

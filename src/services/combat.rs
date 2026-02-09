@@ -82,7 +82,7 @@ fn apply_phaser_damage_to_klingons(
         .sector_map
         .klingons
         .iter()
-        .filter(|k| k.shields > 0.0)
+        .filter(|k| k.is_alive())
         .count();
 
     if num_klingons == 0 {
@@ -94,7 +94,7 @@ fn apply_phaser_damage_to_klingons(
 
     // Apply damage to each Klingon
     for klingon in galaxy.sector_map.klingons.iter_mut() {
-        if klingon.shields <= 0.0 {
+        if !klingon.is_alive() {
             continue; // Already dead
         }
 
@@ -111,7 +111,7 @@ fn apply_phaser_damage_to_klingons(
         println!("   ({} LEFT)", klingon.shields.max(0.0) as i32);
 
         // If Klingon destroyed, collect position for cleanup
-        if klingon.shields <= 0.0 {
+        if !klingon.is_alive() {
             destroyed_positions.push(klingon.sector);
         }
     }
@@ -130,7 +130,7 @@ fn cleanup_destroyed_klingons(galaxy: &mut Galaxy, destroyed_positions: &[Sector
     }
 
     // Remove all dead Klingons from the vector in one pass
-    galaxy.sector_map.klingons.retain(|k| k.shields > 0.0);
+    galaxy.sector_map.klingons.retain(|k| k.is_alive());
 }
 
 /// Check for victory condition after Klingon destruction.
@@ -346,7 +346,7 @@ pub fn klingons_fire(galaxy: &mut Galaxy) -> bool {
     let e_pos = galaxy.enterprise.sector;
 
     for klingon in galaxy.sector_map.klingons.iter() {
-        if klingon.shields <= 0.0 {
+        if !klingon.is_alive() {
             continue; // Already dead
         }
 
@@ -607,12 +607,12 @@ mod tests {
         assert_eq!(galaxy.sector_map.klingons.len(), 3);
 
         // Apply retain
-        galaxy.sector_map.klingons.retain(|k| k.shields > 0.0);
+        galaxy.sector_map.klingons.retain(|k| k.is_alive());
 
         // Should have 2 living Klingons left
         assert_eq!(galaxy.sector_map.klingons.len(), 2);
         for k in &galaxy.sector_map.klingons {
-            assert!(k.shields > 0.0);
+            assert!(k.is_alive());
         }
     }
 
@@ -662,7 +662,7 @@ mod tests {
         // Destroy Klingon
         galaxy.sector_map.klingons[0].shields = 0.0;
         galaxy.sector_map.set(klingon_pos, SectorContent::Empty);
-        galaxy.sector_map.klingons.retain(|k| k.shields > 0.0);
+        galaxy.sector_map.klingons.retain(|k| k.is_alive());
 
         // Verify grid is cleared and vector is empty
         assert_eq!(galaxy.sector_map.get(klingon_pos), SectorContent::Empty);

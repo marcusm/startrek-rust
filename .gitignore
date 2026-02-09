@@ -27,3 +27,4 @@ target
 
 # Windows artifact
 nul
+test_results.txt
