@@ -24,8 +24,10 @@ pub fn navigate(galaxy: &mut Galaxy) {
         if galaxy.enterprise.shields < 1.0 {
             println!("THE ENTERPRISE IS DEAD IN SPACE. IF YOU SURVIVE ALL IMPENDING");
             println!("ATTACK YOU WILL BE DEMOTED TO THE RANK OF PRIVATE");
-            // TODO: Implement repeated Klingon fire loop (spec 10.4)
-            return; // Prevent movement
+
+            // Klingons fire repeatedly until Enterprise destroyed or survives (spec 10.4)
+            dead_in_space_loop(galaxy);
+            return; // Game ended (either destroyed or demoted)
         } else {
             println!(
                 "YOU HAVE {} UNITS OF ENERGY",
@@ -315,6 +317,34 @@ fn read_line(prompt: &str) -> String {
     let mut input = String::new();
     io::stdin().read_line(&mut input).unwrap();
     input
+}
+
+/// Handle the dead-in-space scenario where Klingons fire repeatedly (spec 10.4).
+/// The Enterprise is stuck with no energy and minimal shields. All Klingons in the
+/// quadrant fire until either the Enterprise is destroyed or miraculously survives.
+fn dead_in_space_loop(galaxy: &mut Galaxy) {
+    loop {
+        // Check if there are any Klingons left to fire
+        if galaxy.sector_map.klingons.is_empty() {
+            // No Klingons to fire - Enterprise survives, demoted to private
+            println!();
+            println!(
+                "THERE ARE STILL {} KLINGON BATTLE CRUISERS",
+                galaxy.total_klingons
+            );
+            std::process::exit(0);
+        }
+
+        // Klingons fire (uses existing combat::klingons_fire function)
+        // This function returns true if Enterprise is destroyed (shields < 0)
+        if combat::klingons_fire(galaxy) {
+            return; // Enterprise destroyed, end_defeat() already called
+        }
+
+        // If we reach here, shields are still >= 0 despite the attack
+        // In practice, this is extremely unlikely with shields < 1
+        // But the spec says "fire repeatedly until" so we continue the loop
+    }
 }
 
 #[cfg(test)]
