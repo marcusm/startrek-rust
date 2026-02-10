@@ -3,14 +3,14 @@ use super::position::{QuadrantPosition, SectorPosition};
 
 /// The player's starship.
 pub struct Enterprise {
-    pub quadrant: QuadrantPosition,
-    pub sector: SectorPosition,
-    pub energy: f64,
-    pub torpedoes: i32,
-    pub shields: f64,
+    quadrant: QuadrantPosition,
+    sector: SectorPosition,
+    energy: f64,
+    torpedoes: i32,
+    shields: f64,
     /// Damage state for each of the 8 devices.
     /// 0 = operational, negative = damaged, positive = improved.
-    pub devices: [f64; NUM_DEVICES],
+    devices: [f64; NUM_DEVICES],
 }
 
 impl Enterprise {
@@ -23,6 +23,87 @@ impl Enterprise {
             shields: INITIAL_SHIELDS,
             devices: [0.0; NUM_DEVICES],
         }
+    }
+
+    // Getters
+    pub fn quadrant(&self) -> QuadrantPosition {
+        self.quadrant
+    }
+
+    pub fn sector(&self) -> SectorPosition {
+        self.sector
+    }
+
+    pub fn energy(&self) -> f64 {
+        self.energy
+    }
+
+    pub fn shields(&self) -> f64 {
+        self.shields
+    }
+
+    pub fn torpedoes(&self) -> i32 {
+        self.torpedoes
+    }
+
+    pub fn devices(&self) -> &[f64; NUM_DEVICES] {
+        &self.devices
+    }
+
+    // Controlled mutations
+    pub fn consume_energy(&mut self, amount: f64) -> Result<(), &'static str> {
+        if self.energy >= amount {
+            self.energy -= amount;
+            Ok(())
+        } else {
+            Err("Insufficient energy")
+        }
+    }
+
+    pub fn move_to(&mut self, quadrant: QuadrantPosition, sector: SectorPosition) {
+        self.quadrant = quadrant;
+        self.sector = sector;
+    }
+
+    pub fn set_shields(&mut self, value: f64) {
+        self.shields = value;
+    }
+
+    pub fn consume_torpedo(&mut self) -> Result<(), &'static str> {
+        if self.torpedoes > 0 {
+            self.torpedoes -= 1;
+            Ok(())
+        } else {
+            Err("No torpedoes remaining")
+        }
+    }
+
+    pub fn damage_device(&mut self, device: Device, amount: f64) {
+        self.devices[device as usize] -= amount;
+    }
+
+    pub fn repair_device(&mut self, device: Device, amount: f64) {
+        self.devices[device as usize] += amount;
+    }
+
+    pub fn set_energy(&mut self, value: f64) {
+        self.energy = value;
+    }
+
+    pub fn set_torpedoes(&mut self, value: i32) {
+        self.torpedoes = value;
+    }
+
+    pub fn add_energy(&mut self, amount: f64) {
+        self.energy += amount;
+    }
+
+    pub fn subtract_energy(&mut self, amount: f64) {
+        self.energy -= amount;
+    }
+
+    pub fn subtract_shields(&mut self, amount: f64) {
+        self.shields -= amount;
     }
 
     pub fn is_damaged(&self, device: Device) -> bool {
@@ -124,9 +205,9 @@ mod tests {
             QuadrantPosition { x: 1, y: 1 },
             sector,
         );
-        e.energy = 1000.0;
-        e.shields = 500.0;
-        e.torpedoes = 3;
+        e.set_energy(1000.0);
+        e.set_shields(500.0);
+        e.set_torpedoes(3);
         e
     }
 
@@ -136,9 +217,9 @@ mod tests {
         let starbase = Some(SectorPosition { x: 5, y: 4 });
 
         assert!(e.check_docking(starbase));
-        assert_eq!(e.energy, INITIAL_ENERGY);
-        assert_eq!(e.torpedoes, INITIAL_TORPEDOES);
-        assert_eq!(e.shields, INITIAL_SHIELDS);
+        assert_eq!(e.energy(), INITIAL_ENERGY);
+        assert_eq!(e.torpedoes(), INITIAL_TORPEDOES);
+        assert_eq!(e.shields(), INITIAL_SHIELDS);
     }
 
     #[test]
@@ -155,8 +236,8 @@ mod tests {
         let starbase = Some(SectorPosition { x: 4, y: 4 });
 
         assert!(!e.check_docking(starbase));
-        assert_eq!(e.energy, 1000.0);
-        assert_eq!(e.torpedoes, 3);
+        assert_eq!(e.energy(), 1000.0);
+        assert_eq!(e.torpedoes(), 3);
     }
 
     #[test]
@@ -202,7 +283,7 @@ mod tests {
     fn damage_report_blocked_when_damage_control_damaged() {
         use crate::models::constants::Device;
         let mut e = enterprise_at(SectorPosition { x: 1, y: 1 });
-        e.devices[Device::DamageControl as usize] = -1.0;
+        e.damage_device(Device::DamageControl, 1.0);
         assert!(e.is_damaged(Device::DamageControl));
         // Should print the unavailable message and return early.
         e.damage_report(&mut MockOutput::new());
@@ -213,9 +294,9 @@ mod tests {
         use crate::models::constants::Device;
         let mut e = enterprise_at(SectorPosition { x: 1, y: 1 });
         // Damage everything except DamageControl
-        e.devices[Device::WarpEngines as usize] = -3.0;
-        e.devices[Device::ShortRangeSensors as usize] = -1.0;
-        e.devices[Device::Computer as usize] = -5.0;
+        e.damage_device(Device::WarpEngines, 3.0);
+        e.damage_device(Device::ShortRangeSensors, 1.0);
+        e.damage_device(Device::Computer, 5.0);
         assert!(!e.is_damaged(Device::DamageControl));
         // Should still produce the report.
         e.damage_report(&mut MockOutput::new());
@@ -225,11 +306,11 @@ mod tests {
     fn damage_report_truncates_values() {
         use crate::models::constants::Device;
         let mut e = enterprise_at(SectorPosition { x: 1, y: 1 });
-        e.devices[Device::WarpEngines as usize] = -3.7;
-        e.devices[Device::PhaserControl as usize] = 2.9;
+        e.damage_device(Device::WarpEngines, 3.7);
+        e.repair_device(Device::PhaserControl, 2.9);
         // Truncation: -3.7 as i32 = -3, 2.9 as i32 = 2
-        assert_eq!(e.devices[Device::WarpEngines as usize] as i32, -3);
-        assert_eq!(e.devices[Device::PhaserControl as usize] as i32, 2);
+        assert_eq!(e.devices()[Device::WarpEngines as usize] as i32, -3);
+        assert_eq!(e.devices()[Device::PhaserControl as usize] as i32, 2);
         e.damage_report(&mut MockOutput::new());
     }
 
@@ -239,15 +320,15 @@ mod tests {
     fn shield_control_transfers_energy_to_shields() {
         let mut e = enterprise_at(SectorPosition { x: 1, y: 1 });
         // Initial: energy = 1000, shields = 500
-        let initial_total = e.energy + e.shields; // 1500
+        let initial_total = e.energy() + e.shields(); // 1500
 
         // Transfer 300 more to shields (total shields = 800)
         let result = e.shield_control(800.0);
 
         assert!(result.is_ok());
-        assert_eq!(e.shields, 800.0);
-        assert_eq!(e.energy, 700.0);
-        assert_eq!(e.energy + e.shields, initial_total); // Total conserved
+        assert_eq!(e.shields(), 800.0);
+        assert_eq!(e.energy(), 700.0);
+        assert_eq!(e.energy() + e.shields(), initial_total); // Total conserved
     }
 
     #[test]
@@ -259,8 +340,8 @@ mod tests {
         let result = e.shield_control(100.0);
 
         assert!(result.is_ok());
-        assert_eq!(e.shields, 100.0);
-        assert_eq!(e.energy, 1400.0);
+        assert_eq!(e.shields(), 100.0);
+        assert_eq!(e.energy(), 1400.0);
     }
 
     #[test]
@@ -268,14 +349,14 @@ mod tests {
         use super::ShieldControlError;
         use crate::models::constants::Device;
         let mut e = enterprise_at(SectorPosition { x: 1, y: 1 });
-        e.devices[Device::ShieldControl as usize] = -2.0;
+        e.damage_device(Device::ShieldControl, 2.0);
 
         let result = e.shield_control(600.0);
 
         assert_eq!(result, Err(ShieldControlError::SystemDamaged));
         // Energy and shields unchanged
-        assert_eq!(e.energy, 1000.0);
-        assert_eq!(e.shields, 500.0);
+        assert_eq!(e.energy(), 1000.0);
+        assert_eq!(e.shields(), 500.0);
     }
 
     #[test]
@@ -287,8 +368,8 @@ mod tests {
 
         assert_eq!(result, Err(ShieldControlError::InvalidInput));
         // Energy and shields unchanged
-        assert_eq!(e.energy, 1000.0);
-        assert_eq!(e.shields, 500.0);
+        assert_eq!(e.energy(), 1000.0);
+        assert_eq!(e.shields(), 500.0);
     }
 
     #[test]
@@ -300,8 +381,8 @@ mod tests {
 
         assert_eq!(result, Err(ShieldControlError::InvalidInput));
         // Energy and shields unchanged
-        assert_eq!(e.energy, 1000.0);
-        assert_eq!(e.shields, 500.0);
+        assert_eq!(e.energy(), 1000.0);
+        assert_eq!(e.shields(), 500.0);
     }
 
     #[test]
@@ -314,49 +395,49 @@ mod tests {
 
         assert_eq!(result, Err(ShieldControlError::InsufficientEnergy));
         // Energy and shields unchanged
-        assert_eq!(e.energy, 1000.0);
-        assert_eq!(e.shields, 500.0);
+        assert_eq!(e.energy(), 1000.0);
+        assert_eq!(e.shields(), 500.0);
     }
 
     #[test]
     fn shield_control_can_use_all_energy_for_shields() {
         let mut e = enterprise_at(SectorPosition { x: 1, y: 1 });
-        let total = e.energy + e.shields; // 1500
+        let total = e.energy() + e.shields(); // 1500
 
         // Put all energy into shields
         let result = e.shield_control(total);
 
         assert!(result.is_ok());
-        assert_eq!(e.shields, total);
-        assert_eq!(e.energy, 0.0);
+        assert_eq!(e.shields(), total);
+        assert_eq!(e.energy(), 0.0);
     }
 
     #[test]
     fn shield_control_can_remove_all_shields() {
         let mut e = enterprise_at(SectorPosition { x: 1, y: 1 });
-        e.shields = 1000.0;
-        e.energy = 500.0;
+        e.set_shields(1000.0);
+        e.set_energy(500.0);
 
         // Minimum valid input is slightly above 0
         let result = e.shield_control(0.1);
 
         assert!(result.is_ok());
-        assert_eq!(e.shields, 0.1);
-        assert_eq!(e.energy, 1499.9);
+        assert_eq!(e.shields(), 0.1);
+        assert_eq!(e.energy(), 1499.9);
     }
 
     #[test]
     fn shield_control_exact_boundary_at_total_energy() {
         let mut e = enterprise_at(SectorPosition { x: 1, y: 1 });
-        e.shields = 800.0;
-        e.energy = 200.0;
+        e.set_shields(800.0);
+        e.set_energy(200.0);
 
         // Exactly at the boundary (should succeed)
         let result = e.shield_control(1000.0);
 
         assert!(result.is_ok());
-        assert_eq!(e.shields, 1000.0);
-        assert_eq!(e.energy, 0.0);
+        assert_eq!(e.shields(), 1000.0);
+        assert_eq!(e.energy(), 0.0);
 
         // Just above the boundary (should fail)
         let result = e.shield_control(1000.1);
@@ -366,18 +447,18 @@ mod tests {
     #[test]
     fn shield_control_preserves_total_energy() {
         let mut e = enterprise_at(SectorPosition { x: 1, y: 1 });
-        e.energy = 2000.0;
-        e.shields = 300.0;
+        e.set_energy(2000.0);
+        e.set_shields(300.0);
         let initial_total = 2300.0;
 
         // Multiple transfers
         let _ = e.shield_control(1000.0);
-        assert_eq!(e.energy + e.shields, initial_total);
+        assert_eq!(e.energy() + e.shields(), initial_total);
 
         let _ = e.shield_control(500.0);
-        assert_eq!(e.energy + e.shields, initial_total);
+        assert_eq!(e.energy() + e.shields(), initial_total);
 
         let _ = e.shield_control(2000.0);
-        assert_eq!(e.energy + e.shields, initial_total);
+        assert_eq!(e.energy() + e.shields(), initial_total);
     }
 }

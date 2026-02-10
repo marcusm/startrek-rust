@@ -5,13 +5,13 @@ use crate::models::galaxy::Galaxy;
 
 /// Long Range Sensor Scan — Command 2 (spec section 6.2).
 pub fn long_range_scan(galaxy: &mut Galaxy, output: &mut dyn OutputWriter) -> GameResult<()> {
-    if galaxy.enterprise.is_damaged(Device::LongRangeSensors) {
+    if galaxy.enterprise().is_damaged(Device::LongRangeSensors) {
         output.writeln("LONG RANGE SENSORS ARE INOPERABLE");
         return Ok(());
     }
 
-    let qx = galaxy.enterprise.quadrant.x;
-    let qy = galaxy.enterprise.quadrant.y;
+    let qx = galaxy.enterprise().quadrant().x;
+    let qy = galaxy.enterprise().quadrant().y;
     output.writeln(&format!("LONG RANGE SENSOR SCAN FOR QUADRANT {},{}", qx, qy));
 
     let border = "-------------------";
@@ -25,7 +25,7 @@ pub fn long_range_scan(galaxy: &mut Galaxy, output: &mut dyn OutputWriter) -> Ga
             {
                 cells.push("xxx".to_string());
             } else {
-                let encoded = galaxy.quadrants[(scan_y - 1) as usize][(scan_x - 1) as usize]
+                let encoded = galaxy.quadrants()[(scan_y - 1) as usize][(scan_x - 1) as usize]
                     .encoded();
                 cells.push(format!("{:03}", encoded));
                 galaxy.record_quadrant_to_memory(scan_x, scan_y);
@@ -42,27 +42,27 @@ pub fn short_range_scan(galaxy: &mut Galaxy, output: &mut dyn OutputWriter) -> G
     galaxy.check_docking();
     let condition = galaxy.evaluate_condition();
 
-    if galaxy.enterprise.is_damaged(Device::ShortRangeSensors) {
+    if galaxy.enterprise().is_damaged(Device::ShortRangeSensors) {
         output.writeln("*** SHORT RANGE SENSORS ARE OUT ***");
         return Ok(());
     }
 
     let border = "-=--=--=--=--=--=--=--=-";
-    let e = &galaxy.enterprise;
+    let e = galaxy.enterprise();
     let status: [String; SECTOR_SIZE] = [
-        format!("STARDATE  {}", galaxy.stardate as i32),
+        format!("STARDATE  {}", galaxy.stardate() as i32),
         format!("CONDITION {}", condition.label()),
-        format!("QUADRANT  {},{}", e.quadrant.x, e.quadrant.y),
-        format!("SECTOR    {},{}", e.sector.x, e.sector.y),
-        format!("ENERGY    {}", e.energy as i32),
-        format!("SHIELDS   {}", e.shields as i32),
-        format!("PHOTON TORPEDOES {}", e.torpedoes),
+        format!("QUADRANT  {},{}", e.quadrant().x, e.quadrant().y),
+        format!("SECTOR    {},{}", e.sector().x, e.sector().y),
+        format!("ENERGY    {}", e.energy() as i32),
+        format!("SHIELDS   {}", e.shields() as i32),
+        format!("PHOTON TORPEDOES {}", e.torpedoes()),
         String::new(),
     ];
 
     output.writeln(&border);
     for y in 1..=SECTOR_SIZE as i32 {
-        let row = galaxy.sector_map.render_row(y);
+        let row = galaxy.sector_map().render_row(y);
         let idx = (y - 1) as usize;
         if !status[idx].is_empty() {
             output.writeln(&format!("{}        {}", row, status[idx]));
@@ -93,7 +93,7 @@ mod tests {
         use crate::io::test_utils::MockOutput;
         let mut galaxy = Galaxy::new(42);
         let mut output = MockOutput::new();
-        galaxy.enterprise.devices[Device::ShortRangeSensors as usize] = -1.0;
+        galaxy.enterprise_mut().damage_device(Device::ShortRangeSensors, 1.0);
         // Should print damage message and return without panicking
         short_range_scan(&mut galaxy, &mut output).unwrap();
     }
@@ -111,7 +111,7 @@ mod tests {
         use crate::io::test_utils::MockOutput;
         let mut galaxy = Galaxy::new(42);
         let mut output = MockOutput::new();
-        galaxy.enterprise.devices[Device::LongRangeSensors as usize] = -1.0;
+        galaxy.enterprise_mut().damage_device(Device::LongRangeSensors, 1.0);
         // Should print damage message and return without panicking
         long_range_scan(&mut galaxy, &mut output).unwrap();
     }
@@ -122,12 +122,12 @@ mod tests {
         let mut galaxy = Galaxy::new(42);
         let mut output = MockOutput::new();
         // Reset computer memory to verify LRS populates it
-        galaxy.computer_memory = [[-1; GALAXY_SIZE]; GALAXY_SIZE];
+        *galaxy.computer_memory_mut() = [[None; GALAXY_SIZE]; GALAXY_SIZE];
 
         long_range_scan(&mut galaxy, &mut output).unwrap();
 
-        let qx = galaxy.enterprise.quadrant.x;
-        let qy = galaxy.enterprise.quadrant.y;
+        let qx = galaxy.enterprise().quadrant().x;
+        let qy = galaxy.enterprise().quadrant().y;
 
         // The current quadrant and its in-bounds neighbors should now be recorded
         for dy in -1..=1_i32 {
@@ -135,10 +135,10 @@ mod tests {
                 let sx = qx + dx;
                 let sy = qy + dy;
                 if sx >= 1 && sx <= 8 && sy >= 1 && sy <= 8 {
-                    let mem = galaxy.computer_memory[(sy - 1) as usize][(sx - 1) as usize];
+                    let mem = galaxy.computer_memory()[(sy - 1) as usize][(sx - 1) as usize];
                     let actual =
-                        galaxy.quadrants[(sy - 1) as usize][(sx - 1) as usize].encoded();
-                    assert_eq!(mem, actual, "memory at ({},{}) should match quadrant data", sx, sy);
+                        galaxy.quadrants()[(sy - 1) as usize][(sx - 1) as usize];
+                    assert_eq!(mem, Some(actual), "memory at ({},{}) should match quadrant data", sx, sy);
                 }
             }
         }
@@ -149,15 +149,15 @@ mod tests {
         use crate::io::test_utils::MockOutput;
         let mut galaxy = Galaxy::new(42);
         let mut output = MockOutput::new();
-        galaxy.computer_memory = [[-1; GALAXY_SIZE]; GALAXY_SIZE];
-        galaxy.enterprise.devices[Device::Computer as usize] = -1.0;
+        *galaxy.computer_memory_mut() = [[None; GALAXY_SIZE]; GALAXY_SIZE];
+        galaxy.enterprise_mut().damage_device(Device::Computer, 1.0);
 
         long_range_scan(&mut galaxy, &mut output).unwrap();
 
-        // All memory should remain unscanned (-1)
+        // All memory should remain unscanned (None)
         for y in 0..GALAXY_SIZE {
             for x in 0..GALAXY_SIZE {
-                assert_eq!(galaxy.computer_memory[y][x], -1);
+                assert_eq!(galaxy.computer_memory()[y][x], None);
             }
         }
     }

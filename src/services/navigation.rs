@@ -17,15 +17,15 @@ pub fn navigate(
     };
 
     // If Klingons present, they fire before warp move (spec section 8.1)
-    if !galaxy.sector_map.klingons.is_empty() {
+    if !galaxy.sector_map().klingons.is_empty() {
         if combat::klingons_fire(galaxy, output) {
             return Ok(()); // Enterprise destroyed, game ended
         }
     }
 
     // Energy/shields check (no-Klingons path, spec section 10.4)
-    if galaxy.enterprise.energy <= 0.0 {
-        if galaxy.enterprise.shields < 1.0 {
+    if galaxy.enterprise().energy() <= 0.0 {
+        if galaxy.enterprise().shields() < 1.0 {
             output.writeln("THE ENTERPRISE IS DEAD IN SPACE. IF YOU SURVIVE ALL IMPENDING");
             output.writeln("ATTACK YOU WILL BE DEMOTED TO THE RANK OF PRIVATE");
 
@@ -35,11 +35,11 @@ pub fn navigate(
         } else {
             output.writeln(&format!(
                 "YOU HAVE {} UNITS OF ENERGY",
-                galaxy.enterprise.energy as i32
+                galaxy.enterprise().energy() as i32
             ));
             output.writeln(&format!(
                 "SUGGEST YOU GET SOME FROM YOUR SHIELDS WHICH HAVE {} UNITS LEFT",
-                galaxy.enterprise.shields as i32
+                galaxy.enterprise().shields() as i32
             ));
             return Ok(()); // Prevent movement
         }
@@ -83,7 +83,7 @@ fn read_course_and_warp(
     }
 
     // Check for damaged warp engines
-    if galaxy.enterprise.is_damaged(Device::WarpEngines) && warp_factor > 0.2 {
+    if galaxy.enterprise().is_damaged(Device::WarpEngines) && warp_factor > 0.2 {
         output.writeln("WARP ENGINES ARE DAMAGED, MAXIMUM SPEED = WARP .2");
         return Ok(None);
     }
@@ -161,16 +161,16 @@ fn execute_move(galaxy: &mut Galaxy, course: f64, warp_factor: f64, output: &mut
         return;
     }
 
-    let old_sector = galaxy.enterprise.sector;
-    let old_quadrant = galaxy.enterprise.quadrant;
+    let old_sector = galaxy.enterprise().sector();
+    let old_quadrant = galaxy.enterprise().quadrant();
 
-    let mut sx = galaxy.enterprise.sector.x as f64;
-    let mut sy = galaxy.enterprise.sector.y as f64;
+    let mut sx = galaxy.enterprise().sector().x as f64;
+    let mut sy = galaxy.enterprise().sector().y as f64;
     let mut crossed_boundary = false;
 
     // Remove Enterprise from current position before moving
     galaxy
-        .sector_map
+        .sector_map_mut()
         .set(old_sector, SectorContent::Empty);
 
     for _ in 0..n {
@@ -190,7 +190,7 @@ fn execute_move(galaxy: &mut Galaxy, course: f64, warp_factor: f64, output: &mut
             x: check_x,
             y: check_y,
         };
-        if galaxy.sector_map.get(check_pos) != SectorContent::Empty {
+        if galaxy.sector_map().get(check_pos) != SectorContent::Empty {
             // Back up one step
             sx -= dx;
             sy -= dy;
@@ -216,18 +216,17 @@ fn execute_move(galaxy: &mut Galaxy, course: f64, warp_factor: f64, output: &mut
             n,
         );
 
-        galaxy.enterprise.quadrant = new_quadrant;
-        galaxy.enterprise.sector = new_sector;
+        galaxy.enterprise_mut().move_to(new_quadrant, new_sector);
         galaxy.enter_quadrant();
 
         // Record the new quadrant to computer memory
         galaxy.record_quadrant_to_memory(
-            galaxy.enterprise.quadrant.x,
-            galaxy.enterprise.quadrant.y,
+            galaxy.enterprise().quadrant().x,
+            galaxy.enterprise().quadrant().y,
         );
 
         // Boundary crossing always advances stardate by 1
-        galaxy.stardate += 1.0;
+        galaxy.advance_time(1.0);
         check_time_limit(galaxy, output);
     } else {
         // Intra-quadrant move: update sector map
@@ -238,20 +237,26 @@ fn execute_move(galaxy: &mut Galaxy, course: f64, warp_factor: f64, output: &mut
             y: final_y,
         };
 
+        let quadrant = galaxy.enterprise().quadrant();
         galaxy
-            .sector_map
+            .sector_map_mut()
             .set(new_sector, SectorContent::Enterprise);
-        galaxy.enterprise.sector = new_sector;
+        galaxy.enterprise_mut().move_to(quadrant, new_sector);
 
         // Advance stardate only for warp >= 1
         if warp_factor >= 1.0 {
-            galaxy.stardate += 1.0;
+            galaxy.advance_time(1.0);
             check_time_limit(galaxy, output);
         }
     }
 
     // Energy cost: N - 5 (short moves can gain energy)
-    galaxy.enterprise.energy -= (n - 5) as f64;
+    let cost = (n - 5) as f64;
+    if cost > 0.0 {
+        galaxy.enterprise_mut().subtract_energy(cost);
+    } else {
+        galaxy.enterprise_mut().add_energy(-cost);
+    }
 
     // Automatic repair (spec section 5.2)
     auto_repair_devices(galaxy);
@@ -262,13 +267,13 @@ fn execute_move(galaxy: &mut Galaxy, course: f64, warp_factor: f64, output: &mut
 
 /// Check if the time limit has been exceeded and end the game if so (spec section 10.3).
 fn check_time_limit(galaxy: &Galaxy, output: &mut dyn OutputWriter) {
-    let time_limit = galaxy.starting_stardate + galaxy.mission_duration;
-    if galaxy.stardate > time_limit {
+    let time_limit = galaxy.starting_stardate() + galaxy.mission_duration();
+    if galaxy.stardate() > time_limit {
         output.writeln("");
-        output.writeln(&format!("IT IS STARDATE {}", galaxy.stardate as i32));
+        output.writeln(&format!("IT IS STARDATE {}", galaxy.stardate() as i32));
         output.writeln(&format!(
             "THERE ARE STILL {} KLINGON BATTLE CRUISERS",
-            galaxy.total_klingons
+            galaxy.total_klingons()
         ));
         std::process::exit(0);
     }
@@ -277,9 +282,10 @@ fn check_time_limit(galaxy: &Galaxy, output: &mut dyn OutputWriter) {
 /// Automatic device repair on navigation moves (spec section 5.2).
 /// Each damaged device (value < 0) is incremented by 1.
 fn auto_repair_devices(galaxy: &mut Galaxy) {
-    for device_value in galaxy.enterprise.devices.iter_mut() {
-        if *device_value < 0.0 {
-            *device_value += 1.0;
+    use crate::models::constants::Device;
+    for device in Device::ALL.iter() {
+        if galaxy.enterprise().is_damaged(*device) {
+            galaxy.enterprise_mut().repair_device(*device, 1.0);
         }
     }
 }
@@ -291,30 +297,30 @@ fn random_damage_event(galaxy: &mut Galaxy, output: &mut dyn OutputWriter) {
     use rand::Rng;
 
     // 20% chance of event - FIXED: using galaxy.rng for determinism!
-    if galaxy.rng.gen::<f64>() > 0.2 {
+    if galaxy.rng_mut().gen::<f64>() > 0.2 {
         return;
     }
 
     // Select random device (0-7 index)
-    let device_index = (galaxy.rng.gen::<f64>() * 8.0).floor() as usize;
+    let device_index = (galaxy.rng_mut().gen::<f64>() * 8.0).floor() as usize;
 
     // Determine severity (1-5)
-    let severity = (galaxy.rng.gen::<f64>() * 5.0).floor() + 1.0;
+    let severity = (galaxy.rng_mut().gen::<f64>() * 5.0).floor() + 1.0;
 
     // 50% chance of damage vs repair
-    let is_repair = galaxy.rng.gen::<f64>() >= 0.5;
+    let is_repair = galaxy.rng_mut().gen::<f64>() >= 0.5;
 
     let device = Device::ALL[device_index];
 
     output.writeln("");
     if is_repair {
-        galaxy.enterprise.devices[device_index] += severity;
+        galaxy.enterprise_mut().repair_device(device, severity);
         output.writeln(&format!(
             "DAMAGE CONTROL REPORT: {} STATE OF REPAIR IMPROVED",
             device.name()
         ));
     } else {
-        galaxy.enterprise.devices[device_index] -= severity;
+        galaxy.enterprise_mut().damage_device(device, severity);
         output.writeln(&format!("DAMAGE CONTROL REPORT: {} DAMAGED", device.name()));
     }
     output.writeln("");
@@ -327,12 +333,12 @@ fn random_damage_event(galaxy: &mut Galaxy, output: &mut dyn OutputWriter) {
 fn dead_in_space_loop(galaxy: &mut Galaxy, output: &mut dyn OutputWriter) {
     loop {
         // Check if there are any Klingons left to fire
-        if galaxy.sector_map.klingons.is_empty() {
+        if galaxy.sector_map().klingons.is_empty() {
             // No Klingons to fire - Enterprise survives, demoted to private
             output.writeln("");
             output.writeln(&format!(
                 "THERE ARE STILL {} KLINGON BATTLE CRUISERS",
-                galaxy.total_klingons
+                galaxy.total_klingons()
             ));
             std::process::exit(0);
         }
@@ -457,7 +463,7 @@ mod tests {
     #[test]
     fn energy_cost_warp_1() {
         let mut galaxy = Galaxy::new(42);
-        let initial_energy = galaxy.enterprise.energy;
+        let initial_energy = galaxy.enterprise().energy();
         // Place Enterprise somewhere safe with clear path
         place_enterprise_for_test(&mut galaxy, 4, 4, 4, 4);
 
@@ -465,34 +471,34 @@ mod tests {
         execute_move(&mut galaxy,3.0, 1.0, &mut MockOutput::new());
         let expected = initial_energy - 3.0;
         assert!(
-            (galaxy.enterprise.energy - expected).abs() < 1e-10,
+            (galaxy.enterprise().energy() - expected).abs() < 1e-10,
             "warp 1.0: expected energy {}, got {}",
             expected,
-            galaxy.enterprise.energy,
+            galaxy.enterprise().energy(),
         );
     }
 
     #[test]
     fn energy_cost_warp_half_gains_energy() {
         let mut galaxy = Galaxy::new(42);
-        let initial_energy = galaxy.enterprise.energy;
+        let initial_energy = galaxy.enterprise().energy();
         place_enterprise_for_test(&mut galaxy, 4, 4, 4, 4);
 
         // Warp 0.5 → n=4, cost = 4-5 = -1 → gains 1 energy
         execute_move(&mut galaxy,3.0, 0.5, &mut MockOutput::new());
         let expected = initial_energy + 1.0;
         assert!(
-            (galaxy.enterprise.energy - expected).abs() < 1e-10,
+            (galaxy.enterprise().energy() - expected).abs() < 1e-10,
             "warp 0.5: expected energy {}, got {}",
             expected,
-            galaxy.enterprise.energy,
+            galaxy.enterprise().energy(),
         );
     }
 
     #[test]
     fn energy_cost_warp_8() {
         let mut galaxy = Galaxy::new(42);
-        let initial_energy = galaxy.enterprise.energy;
+        let initial_energy = galaxy.enterprise().energy();
         place_enterprise_for_test(&mut galaxy, 4, 4, 4, 4);
 
         // Warp 8.0 → n=64, cost = 64-5 = 59
@@ -500,10 +506,10 @@ mod tests {
         execute_move(&mut galaxy,3.0, 8.0, &mut MockOutput::new());
         let expected = initial_energy - 59.0;
         assert!(
-            (galaxy.enterprise.energy - expected).abs() < 1e-10,
+            (galaxy.enterprise().energy() - expected).abs() < 1e-10,
             "warp 8.0: expected energy {}, got {}",
             expected,
-            galaxy.enterprise.energy,
+            galaxy.enterprise().energy(),
         );
     }
 
@@ -512,14 +518,14 @@ mod tests {
     #[test]
     fn time_advances_at_warp_1() {
         let mut galaxy = Galaxy::new(42);
-        let initial_stardate = galaxy.stardate;
+        let initial_stardate = galaxy.stardate();
         place_enterprise_for_test(&mut galaxy, 4, 4, 1, 4);
 
         // Course 1 (east), warp 1.0 — will cross quadrant boundary (8 steps from sector 1)
         // Boundary crossing always advances stardate
         execute_move(&mut galaxy,1.0, 1.0, &mut MockOutput::new());
         assert!(
-            galaxy.stardate > initial_stardate,
+            galaxy.stardate() > initial_stardate,
             "stardate should advance at warp >= 1.0",
         );
     }
@@ -527,13 +533,13 @@ mod tests {
     #[test]
     fn time_unchanged_sub_warp_no_crossing() {
         let mut galaxy = Galaxy::new(42);
-        let initial_stardate = galaxy.stardate;
+        let initial_stardate = galaxy.stardate();
         place_enterprise_for_test(&mut galaxy, 4, 4, 4, 4);
 
         // Course 3 (north), warp 0.25 → n=2 steps, stays in quadrant
         execute_move(&mut galaxy,3.0, 0.25, &mut MockOutput::new());
         assert!(
-            (galaxy.stardate - initial_stardate).abs() < 1e-10,
+            (galaxy.stardate() - initial_stardate).abs() < 1e-10,
             "stardate should not advance for sub-warp without crossing",
         );
     }
@@ -547,8 +553,8 @@ mod tests {
 
         // Course 1 (east), warp 0.25 → n=2 steps
         execute_move(&mut galaxy,1.0, 0.25, &mut MockOutput::new());
-        assert_eq!(galaxy.enterprise.sector.x, 4);
-        assert_eq!(galaxy.enterprise.sector.y, 4);
+        assert_eq!(galaxy.enterprise().sector().x, 4);
+        assert_eq!(galaxy.enterprise().sector().y, 4);
     }
 
     #[test]
@@ -558,8 +564,8 @@ mod tests {
 
         // Course 3 (north, dy=-1), warp 0.375 → n=3 steps
         execute_move(&mut galaxy,3.0, 0.375, &mut MockOutput::new());
-        assert_eq!(galaxy.enterprise.sector.x, 4);
-        assert_eq!(galaxy.enterprise.sector.y, 3);
+        assert_eq!(galaxy.enterprise().sector().x, 4);
+        assert_eq!(galaxy.enterprise().sector().y, 3);
     }
 
     #[test]
@@ -569,8 +575,8 @@ mod tests {
 
         // Course 7 (south, dy=+1), warp 0.25 → n=2 steps
         execute_move(&mut galaxy,7.0, 0.25, &mut MockOutput::new());
-        assert_eq!(galaxy.enterprise.sector.x, 4);
-        assert_eq!(galaxy.enterprise.sector.y, 4);
+        assert_eq!(galaxy.enterprise().sector().x, 4);
+        assert_eq!(galaxy.enterprise().sector().y, 4);
     }
 
     // --- Collision detection test ---
@@ -582,14 +588,14 @@ mod tests {
 
         // Place a star at sector (4, 4)
         galaxy
-            .sector_map
+            .sector_map_mut()
             .set(SectorPosition { x: 4, y: 4 }, SectorContent::Star);
 
         // Course 1 (east), warp 0.5 → n=4 steps from sector (1,4)
         // Should stop at (3,4) — one before the star
         execute_move(&mut galaxy,1.0, 0.5, &mut MockOutput::new());
-        assert_eq!(galaxy.enterprise.sector.x, 3);
-        assert_eq!(galaxy.enterprise.sector.y, 4);
+        assert_eq!(galaxy.enterprise().sector().x, 3);
+        assert_eq!(galaxy.enterprise().sector().y, 4);
     }
 
     // --- Quadrant boundary crossing integration test ---
@@ -599,7 +605,7 @@ mod tests {
         let mut galaxy = Galaxy::new(42);
         place_enterprise_for_test(&mut galaxy, 4, 4, 7, 4);
 
-        let initial_quad_x = galaxy.enterprise.quadrant.x;
+        let initial_quad_x = galaxy.enterprise().quadrant().x;
 
         // Course 1 (east), warp 0.5 → n=4 steps from sector 7
         // Steps: 8 (boundary check: 8 < 8.5 is false at >= 8.5), so step 2 → sx=9 → crosses
@@ -607,7 +613,7 @@ mod tests {
 
         // Should have crossed into a new quadrant
         assert_ne!(
-            galaxy.enterprise.quadrant.x, initial_quad_x,
+            galaxy.enterprise().quadrant().x, initial_quad_x,
             "should have crossed to a new quadrant"
         );
     }
@@ -624,23 +630,26 @@ mod tests {
         sect_y: i32,
     ) {
         // Clear old Enterprise position
+        let old_sector = galaxy.enterprise().sector();
         galaxy
-            .sector_map
-            .set(galaxy.enterprise.sector, SectorContent::Empty);
+            .sector_map_mut()
+            .set(old_sector, SectorContent::Empty);
 
-        galaxy.enterprise.quadrant = QuadrantPosition {
+        let quadrant = QuadrantPosition {
             x: quad_x,
             y: quad_y,
         };
-        galaxy.enterprise.sector = SectorPosition {
+        let sector = SectorPosition {
             x: sect_x,
             y: sect_y,
         };
+        galaxy.enterprise_mut().move_to(quadrant, sector);
 
         // Clear the sector map and place Enterprise
-        galaxy.sector_map = crate::models::sector_map::SectorMap::new();
+        *galaxy.sector_map_mut() = crate::models::sector_map::SectorMap::new();
+        let new_sector = galaxy.enterprise().sector();
         galaxy
-            .sector_map
-            .set(galaxy.enterprise.sector, SectorContent::Enterprise);
+            .sector_map_mut()
+            .set(new_sector, SectorContent::Enterprise);
     }
 }

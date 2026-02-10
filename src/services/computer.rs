@@ -10,7 +10,7 @@ pub fn library_computer(
     io: &mut dyn InputReader,
     output: &mut dyn OutputWriter,
 ) -> GameResult<()> {
-    if galaxy.enterprise.is_damaged(Device::Computer) {
+    if galaxy.enterprise().is_damaged(Device::Computer) {
         output.writeln("COMPUTER DISABLED");
         return Ok(());
     }
@@ -30,8 +30,8 @@ pub fn library_computer(
 
 /// Option 0 — Cumulative Galactic Record (spec section 6.7).
 fn cumulative_galactic_record(galaxy: &Galaxy, output: &mut dyn OutputWriter) {
-    let qx = galaxy.enterprise.quadrant.x;
-    let qy = galaxy.enterprise.quadrant.y;
+    let qx = galaxy.enterprise().quadrant().x;
+    let qy = galaxy.enterprise().quadrant().y;
     output.writeln(&format!("COMPUTER RECORD OF GALAXY FOR QUADRANT {},{}", qx, qy));
 
     let border = "-------------------------------------------------";
@@ -39,11 +39,10 @@ fn cumulative_galactic_record(galaxy: &Galaxy, output: &mut dyn OutputWriter) {
         output.writeln(&border);
         let mut cells: Vec<String> = Vec::new();
         for x in 0..GALAXY_SIZE {
-            let val = galaxy.computer_memory[y][x];
-            if val < 0 {
-                cells.push("???".to_string());
-            } else {
-                cells.push(format!("{:03}", val));
+            let val = galaxy.computer_memory()[y][x];
+            match val {
+                None => cells.push("???".to_string()),
+                Some(data) => cells.push(format!("{:03}", data.encoded())),
             }
         }
         output.writeln(&format!(
@@ -59,14 +58,14 @@ fn cumulative_galactic_record(galaxy: &Galaxy, output: &mut dyn OutputWriter) {
 fn status_report(galaxy: &Galaxy, output: &mut dyn OutputWriter) {
     output.writeln("   STATUS REPORT");
     output.writeln("");
-    output.writeln(&format!("NUMBER OF KLINGONS LEFT  = {}", galaxy.total_klingons));
+    output.writeln(&format!("NUMBER OF KLINGONS LEFT  = {}", galaxy.total_klingons()));
     let stardates_left =
-        (galaxy.starting_stardate + galaxy.mission_duration) - galaxy.stardate;
+        (galaxy.starting_stardate() + galaxy.mission_duration()) - galaxy.stardate();
     output.writeln(&format!("NUMBER OF STARDATES LEFT = {}", stardates_left as i32));
-    output.writeln(&format!("NUMBER OF STARBASES LEFT = {}", galaxy.total_starbases));
+    output.writeln(&format!("NUMBER OF STARBASES LEFT = {}", galaxy.total_starbases()));
 
     // Falls through to damage control report (spec section 6.7)
-    galaxy.enterprise.damage_report(output);
+    galaxy.enterprise().damage_report(output);
 }
 
 /// Option 2 — Photon Torpedo Data (spec section 6.7).
@@ -77,13 +76,13 @@ fn photon_torpedo_data(
     output: &mut dyn OutputWriter,
 ) -> GameResult<()> {
     // Display data for each living Klingon
-    for klingon in &galaxy.sector_map.klingons {
+    for klingon in &galaxy.sector_map().klingons {
         if !klingon.is_alive() {
             continue; // Skip dead Klingons
         }
 
         let (direction, distance) = calculate_direction_and_distance(
-            galaxy.enterprise.sector,
+            galaxy.enterprise().sector(),
             klingon.sector,
         );
 
@@ -109,10 +108,10 @@ fn use_calculator(
 ) -> GameResult<()> {
     output.writeln(&format!(
         "YOU ARE AT QUADRANT {},{} SECTOR {},{}",
-        galaxy.enterprise.quadrant.x,
-        galaxy.enterprise.quadrant.y,
-        galaxy.enterprise.sector.x,
-        galaxy.enterprise.sector.y
+        galaxy.enterprise().quadrant().x,
+        galaxy.enterprise().quadrant().y,
+        galaxy.enterprise().sector().x,
+        galaxy.enterprise().sector().y
     ));
     output.writeln("SHIP'S & TARGET'S COORDINATES ARE");
 
@@ -218,11 +217,11 @@ mod tests {
     #[test]
     fn galactic_record_shows_unscanned_as_negative() {
         let galaxy = Galaxy::new(42);
-        // Most quadrants should still be -1 (unscanned) except the starting one
+        // Most quadrants should still be None (unscanned) except the starting one
         let mut unscanned_count = 0;
         for y in 0..GALAXY_SIZE {
             for x in 0..GALAXY_SIZE {
-                if galaxy.computer_memory[y][x] < 0 {
+                if galaxy.computer_memory()[y][x].is_none() {
                     unscanned_count += 1;
                 }
             }
@@ -234,53 +233,53 @@ mod tests {
     #[test]
     fn starting_quadrant_is_recorded() {
         let galaxy = Galaxy::new(42);
-        let qx = galaxy.enterprise.quadrant.x;
-        let qy = galaxy.enterprise.quadrant.y;
-        let mem = galaxy.computer_memory[(qy - 1) as usize][(qx - 1) as usize];
-        let actual = galaxy.quadrants[(qy - 1) as usize][(qx - 1) as usize].encoded();
-        assert_eq!(mem, actual);
+        let qx = galaxy.enterprise().quadrant().x;
+        let qy = galaxy.enterprise().quadrant().y;
+        let mem = galaxy.computer_memory()[(qy - 1) as usize][(qx - 1) as usize];
+        let actual = galaxy.quadrants()[(qy - 1) as usize][(qx - 1) as usize];
+        assert_eq!(mem, Some(actual));
     }
 
     #[test]
     fn record_blocked_when_computer_damaged() {
         let mut galaxy = Galaxy::new(42);
-        galaxy.enterprise.devices[Device::Computer as usize] = -1.0;
+        galaxy.enterprise_mut().damage_device(Device::Computer, 1.0);
 
         // Pick a quadrant we know is unscanned
-        let qx = galaxy.enterprise.quadrant.x;
-        let qy = galaxy.enterprise.quadrant.y;
+        let qx = galaxy.enterprise().quadrant().x;
+        let qy = galaxy.enterprise().quadrant().y;
         let target_x = if qx < 8 { qx + 1 } else { qx - 1 };
 
-        // Should still be -1 (unscanned)
+        // Should still be None (unscanned)
         assert_eq!(
-            galaxy.computer_memory[(qy - 1) as usize][(target_x - 1) as usize],
-            -1
+            galaxy.computer_memory()[(qy - 1) as usize][(target_x - 1) as usize],
+            None
         );
 
         // Try to record — should be blocked
         galaxy.record_quadrant_to_memory(target_x, qy);
         assert_eq!(
-            galaxy.computer_memory[(qy - 1) as usize][(target_x - 1) as usize],
-            -1
+            galaxy.computer_memory()[(qy - 1) as usize][(target_x - 1) as usize],
+            None
         );
     }
 
     #[test]
     fn status_report_stardates_remaining() {
         let galaxy = Galaxy::new(42);
-        let expected = (galaxy.starting_stardate + galaxy.mission_duration) - galaxy.stardate;
+        let expected = (galaxy.starting_stardate() + galaxy.mission_duration()) - galaxy.stardate();
         // At game start, stardate == starting_stardate, so remaining == mission_duration
-        assert_eq!(expected as i32, galaxy.mission_duration as i32);
+        assert_eq!(expected as i32, galaxy.mission_duration() as i32);
     }
 
     #[test]
     fn status_report_stardates_decrease_over_time() {
         let mut galaxy = Galaxy::new(42);
         let initial_remaining =
-            (galaxy.starting_stardate + galaxy.mission_duration) - galaxy.stardate;
-        galaxy.stardate += 5.0;
+            (galaxy.starting_stardate() + galaxy.mission_duration()) - galaxy.stardate();
+        galaxy.advance_time(5.0);
         let after_remaining =
-            (galaxy.starting_stardate + galaxy.mission_duration) - galaxy.stardate;
+            (galaxy.starting_stardate() + galaxy.mission_duration()) - galaxy.stardate();
         assert_eq!((initial_remaining - after_remaining) as i32, 5);
     }
 
@@ -295,7 +294,7 @@ mod tests {
     fn status_report_falls_through_to_damage_report() {
         let mut galaxy = Galaxy::new(99);
         // Damage a device so we can verify the damage report portion runs
-        galaxy.enterprise.devices[Device::WarpEngines as usize] = -2.0;
+        galaxy.enterprise_mut().damage_device(Device::WarpEngines, 2.0);
         // Should not panic — status report prints then falls through to damage_report
         status_report(&galaxy, &mut MockOutput::new());
     }
@@ -303,7 +302,7 @@ mod tests {
     #[test]
     fn status_report_with_damage_control_damaged() {
         let mut galaxy = Galaxy::new(99);
-        galaxy.enterprise.devices[Device::DamageControl as usize] = -1.0;
+        galaxy.enterprise_mut().damage_device(Device::DamageControl, 1.0);
         // The fall-through damage report should print "not available" but not panic
         status_report(&galaxy, &mut MockOutput::new());
     }

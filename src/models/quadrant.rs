@@ -1,6 +1,6 @@
 /// Persistent data about a single quadrant in the galaxy.
 /// Stores only counts — sector positions are not preserved between visits.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct QuadrantData {
     pub klingons: i32,
     pub starbases: i32,

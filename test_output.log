@@ -1,24 +1,24 @@
 
-running 111 tests
+running 118 tests
 test models::enterprise::tests::damage_report_available_when_other_devices_damaged ... ok
 test models::enterprise::tests::damage_report_blocked_when_damage_control_damaged ... ok
 test models::enterprise::tests::damage_report_shows_all_devices_when_undamaged ... ok
-test models::enterprise::tests::damage_report_truncates_values ... ok
-test models::enterprise::tests::no_docking_when_too_far ... ok
-test models::enterprise::tests::docking_when_adjacent_horizontally ... ok
-test models::enterprise::tests::shield_control_can_use_all_energy_for_shields ... ok
 test models::enterprise::tests::docking_when_distance_exactly_one ... ok
-test models::enterprise::tests::no_docking_when_no_starbase ... ok
 test models::enterprise::tests::docking_when_adjacent_diagonally ... ok
 test models::enterprise::tests::shield_control_blocked_when_system_damaged ... ok
+test models::enterprise::tests::docking_when_adjacent_horizontally ... ok
+test models::enterprise::tests::no_docking_when_no_starbase ... ok
 test models::enterprise::tests::shield_control_can_remove_all_shields ... ok
+test models::enterprise::tests::shield_control_can_use_all_energy_for_shields ... ok
+test models::enterprise::tests::damage_report_truncates_values ... ok
 test models::enterprise::tests::shield_control_exact_boundary_at_total_energy ... ok
 test models::enterprise::tests::shield_control_preserves_total_energy ... ok
-test models::enterprise::tests::shield_control_rejects_negative_input ... ok
-test models::enterprise::tests::shield_control_rejects_zero_input ... ok
+test models::enterprise::tests::no_docking_when_too_far ... ok
 test models::enterprise::tests::shield_control_rejects_insufficient_energy ... ok
+test models::enterprise::tests::shield_control_rejects_negative_input ... ok
 test models::enterprise::tests::shield_control_transfers_energy_to_shields ... ok
 test models::enterprise::tests::shield_control_transfers_shields_to_energy ... ok
+test models::enterprise::tests::shield_control_rejects_zero_input ... ok
 test models::galaxy::tests::computer_memory_starts_unscanned_except_starting_quadrant ... ok
 test models::galaxy::tests::condition_docked_adjacent_to_starbase ... ok
 test models::galaxy::tests::condition_green_no_klingons_full_energy ... ok
@@ -26,8 +26,8 @@ test models::galaxy::tests::condition_red_klingons_present ... ok
 test models::galaxy::tests::condition_yellow_low_energy ... ok
 test models::galaxy::tests::decrement_quadrant_klingons_updates_count ... ok
 test models::galaxy::tests::deterministic_with_same_seed ... ok
-test models::galaxy::tests::different_seeds_produce_different_galaxies ... ok
 test models::galaxy::tests::efficiency_rating_calculation ... ok
+test models::galaxy::tests::different_seeds_produce_different_galaxies ... ok
 test models::galaxy::tests::efficiency_rating_truncates_to_integer ... ok
 test models::galaxy::tests::enterprise_starts_with_full_resources ... ok
 test models::galaxy::tests::initial_klingons_equals_total_klingons ... ok
@@ -57,4 +57,3 @@ test services::combat::tests::distance_vertical ... ok
 test services::combat::tests::klingon_destruction_clears_grid ... ok
 test services::combat::tests::klingons_fire_damage_depends_on_distance ... ok
 test services::combat::tests::klingons_fire_does_not_hit_from_dead_klingons ... ok
-test services::combat::tests::klingons_fire_reduces_shields ... 

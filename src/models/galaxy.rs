@@ -5,26 +5,32 @@ use super::constants::{
     Condition, Device, GALAXY_SIZE, INITIAL_ENERGY, MISSION_DURATION, SectorContent,
 };
 use super::enterprise::Enterprise;
+use super::errors::GameResult;
 use super::klingon::Klingon;
 use super::position::{QuadrantPosition, SectorPosition};
 use super::quadrant::QuadrantData;
 use super::sector_map::SectorMap;
 
+/// Consolidated Klingon count tracking
+struct KlingonCount {
+    total: i32,
+    initial: i32,
+}
+
 /// Top-level game state container.
 pub struct Galaxy {
-    pub stardate: f64,
-    pub starting_stardate: f64,
-    pub mission_duration: f64,
+    stardate: f64,
+    starting_stardate: f64,
+    mission_duration: f64,
     /// 8x8 grid of quadrant data. Internal 0-based: quadrants[y-1][x-1].
-    pub quadrants: [[QuadrantData; GALAXY_SIZE]; GALAXY_SIZE],
-    /// Computer's knowledge of the galaxy. -1 = unscanned, otherwise encoded quadrant data.
-    pub computer_memory: [[i32; GALAXY_SIZE]; GALAXY_SIZE],
-    pub total_klingons: i32,
-    pub total_starbases: i32,
-    pub initial_klingons: i32,
-    pub enterprise: Enterprise,
-    pub sector_map: SectorMap,
-    pub rng: StdRng,
+    quadrants: [[QuadrantData; GALAXY_SIZE]; GALAXY_SIZE],
+    /// Computer's knowledge of the galaxy. None = unscanned, Some = scanned quadrant data.
+    computer_memory: [[Option<QuadrantData>; GALAXY_SIZE]; GALAXY_SIZE],
+    klingon_count: KlingonCount,
+    total_starbases: i32,
+    enterprise: Enterprise,
+    sector_map: SectorMap,
+    rng: StdRng,
 }
 
 impl Galaxy {
@@ -53,10 +59,12 @@ impl Galaxy {
             starting_stardate,
             mission_duration: MISSION_DURATION,
             quadrants,
-            computer_memory: [[-1; GALAXY_SIZE]; GALAXY_SIZE],
-            total_klingons,
+            computer_memory: [[None; GALAXY_SIZE]; GALAXY_SIZE],
+            klingon_count: KlingonCount {
+                total: total_klingons,
+                initial: total_klingons,
+            },
             total_starbases,
-            initial_klingons: total_klingons,
             enterprise: Enterprise::new(quadrant, sector),
             sector_map: SectorMap::new(),
             rng,
@@ -67,12 +75,164 @@ impl Galaxy {
 
         // Record starting quadrant to computer memory
         galaxy.record_quadrant_to_memory(
-            galaxy.enterprise.quadrant.x,
-            galaxy.enterprise.quadrant.y,
+            galaxy.enterprise.quadrant().x,
+            galaxy.enterprise.quadrant().y,
         );
 
         galaxy
     }
+
+    // ========== Accessor Methods ==========
+
+    /// Get current stardate
+    pub fn stardate(&self) -> f64 {
+        self.stardate
+    }
+
+    /// Get starting stardate
+    pub fn starting_stardate(&self) -> f64 {
+        self.starting_stardate
+    }
+
+    /// Get mission duration
+    pub fn mission_duration(&self) -> f64 {
+        self.mission_duration
+    }
+
+    /// Get total Klingons remaining
+    pub fn total_klingons(&self) -> i32 {
+        self.klingon_count.total
+    }
+
+    /// Get initial Klingon count
+    pub fn initial_klingons(&self) -> i32 {
+        self.klingon_count.initial
+    }
+
+    /// Get total starbases
+    pub fn total_starbases(&self) -> i32 {
+        self.total_starbases
+    }
+
+    /// Get reference to Enterprise
+    pub fn enterprise(&self) -> &Enterprise {
+        &self.enterprise
+    }
+
+    /// Get mutable reference to Enterprise
+    pub fn enterprise_mut(&mut self) -> &mut Enterprise {
+        &mut self.enterprise
+    }
+
+    /// Get reference to sector map
+    pub fn sector_map(&self) -> &SectorMap {
+        &self.sector_map
+    }
+
+    /// Get mutable reference to sector map
+    pub fn sector_map_mut(&mut self) -> &mut SectorMap {
+        &mut self.sector_map
+    }
+
+    /// Get reference to quadrants array
+    pub fn quadrants(&self) -> &[[QuadrantData; GALAXY_SIZE]; GALAXY_SIZE] {
+        &self.quadrants
+    }
+
+    /// Get mutable reference to RNG
+    pub fn rng_mut(&mut self) -> &mut StdRng {
+        &mut self.rng
+    }
+
+    /// Advance stardate by delta
+    pub fn advance_time(&mut self, delta: f64) {
+        self.stardate += delta;
+    }
+
+    /// Decrement total Klingon count
+    pub fn decrement_klingons(&mut self) {
+        self.klingon_count.total -= 1;
+    }
+
+    /// Decrement total starbase count
+    pub fn decrement_starbases(&mut self) {
+        self.total_starbases -= 1;
+    }
+
+    /// Get reference to computer memory
+    pub fn computer_memory(&self) -> &[[Option<QuadrantData>; GALAXY_SIZE]; GALAXY_SIZE] {
+        &self.computer_memory
+    }
+
+    /// Get mutable reference to computer memory
+    pub fn computer_memory_mut(&mut self) -> &mut [[Option<QuadrantData>; GALAXY_SIZE]; GALAXY_SIZE] {
+        &mut self.computer_memory
+    }
+
+    // Test-only setters
+    #[cfg(test)]
+    pub fn set_total_klingons(&mut self, count: i32) {
+        self.klingon_count.total = count;
+    }
+
+    #[cfg(test)]
+    pub fn set_initial_klingons(&mut self, count: i32) {
+        self.klingon_count.initial = count;
+    }
+
+    #[cfg(test)]
+    pub fn set_total_starbases(&mut self, count: i32) {
+        self.total_starbases = count;
+    }
+
+    #[cfg(test)]
+    pub fn set_stardate(&mut self, stardate: f64) {
+        self.stardate = stardate;
+    }
+
+    #[cfg(test)]
+    pub fn set_starting_stardate(&mut self, stardate: f64) {
+        self.starting_stardate = stardate;
+    }
+
+    // ========== End Accessor Methods ==========
+
+    // ========== Atomic Update Methods ==========
+
+    /// Atomically destroy a Klingon, updating all tracking locations
+    pub fn destroy_klingon(&mut self, pos: SectorPosition) -> GameResult<()> {
+        // Remove from sector map
+        self.sector_map.set(pos, SectorContent::Empty);
+
+        // Decrement global count
+        self.klingon_count.total -= 1;
+
+        // Decrement quadrant count
+        let q = self.enterprise.quadrant();
+        let qy = (q.y - 1) as usize;
+        let qx = (q.x - 1) as usize;
+        self.quadrants[qy][qx].klingons -= 1;
+
+        Ok(())
+    }
+
+    /// Atomically destroy a starbase, updating all tracking locations
+    pub fn destroy_starbase(&mut self, pos: SectorPosition) {
+        // Remove from sector map
+        self.sector_map.set(pos, SectorContent::Empty);
+        self.sector_map.starbase = None;
+
+        // Decrement global count
+        self.total_starbases -= 1;
+
+        // Decrement quadrant count
+        let q = self.enterprise.quadrant();
+        let qy = (q.y - 1) as usize;
+        let qx = (q.x - 1) as usize;
+        self.quadrants[qy][qx].starbases = 0;
+    }
+
+    // ========== End Atomic Update Methods ==========
 
     /// Generate the 8x8 galaxy. Loops until the regeneration guard passes
     /// (total_klingons > 0 AND total_starbases > 0).
@@ -129,7 +289,7 @@ impl Galaxy {
 
         // Place the Enterprise
         self.sector_map
-            .set(self.enterprise.sector, SectorContent::Enterprise);
+            .set(self.enterprise.sector(), SectorContent::Enterprise);
 
         // Place Klingons (each with shields = 200)
         let qdata = self.get_current_quadrant_data();
@@ -157,7 +317,7 @@ impl Galaxy {
         }
 
         // Red alert check (spec section 4.2)
-        if !self.sector_map.klingons.is_empty() && self.enterprise.shields <= 200.0 {
+        if !self.sector_map.klingons.is_empty() && self.enterprise.shields() <= 200.0 {
             println!("COMBAT AREA      CONDITION RED");
             println!("   SHIELDS DANGEROUSLY LOW");
         }
@@ -178,7 +338,7 @@ impl Galaxy {
 
     /// Get the QuadrantData for the Enterprise's current quadrant.
     fn get_current_quadrant_data(&self) -> QuadrantData {
-        let q = self.enterprise.quadrant;
+        let q = self.enterprise.quadrant();
         self.quadrants[(q.y - 1) as usize][(q.x - 1) as usize]
     }
 
@@ -196,7 +356,7 @@ impl Galaxy {
         }
         if x >= 1 && x <= 8 && y >= 1 && y <= 8 {
             self.computer_memory[(y - 1) as usize][(x - 1) as usize] =
-                self.quadrants[(y - 1) as usize][(x - 1) as usize].encoded();
+                Some(self.quadrants[(y - 1) as usize][(x - 1) as usize]);
         }
     }
 
@@ -208,7 +368,7 @@ impl Galaxy {
 
         if !self.sector_map.klingons.is_empty() {
             Condition::Red
-        } else if self.enterprise.energy < INITIAL_ENERGY * 0.1 {
+        } else if self.enterprise.energy() < INITIAL_ENERGY * 0.1 {
             Condition::Yellow
         } else {
             Condition::Green
@@ -217,13 +377,13 @@ impl Galaxy {
 
     /// Check if the player has achieved victory (spec section 10.1).
     pub fn is_victory(&self) -> bool {
-        self.total_klingons == 0
+        self.klingon_count.total == 0
     }
 
     /// Calculate the efficiency rating (spec section 7.7).
     pub fn efficiency_rating(&self) -> i32 {
         let elapsed = self.stardate - self.starting_stardate;
-        ((self.initial_klingons as f64 / elapsed) * 1000.0) as i32
+        ((self.klingon_count.initial as f64 / elapsed) * 1000.0) as i32
     }
 
     /// End the game with victory message and exit (spec section 10.1).
@@ -240,19 +400,19 @@ impl Galaxy {
     pub fn end_defeat(&self, output: &mut dyn crate::io::OutputWriter) {
         output.writeln("");
         output.writeln("THE ENTERPRISE HAS BEEN DESTROYED. THE FEDERATION WILL BE CONQUERED");
-        output.writeln(&format!("THERE ARE STILL {} KLINGON BATTLE CRUISERS", self.total_klingons));
+        output.writeln(&format!("THERE ARE STILL {} KLINGON BATTLE CRUISERS", self.klingon_count.total));
         std::process::exit(0);
     }
 
     /// Update the quadrant's klingon count after removing one.
     pub fn decrement_quadrant_klingons(&mut self) {
-        let q = self.enterprise.quadrant;
+        let q = self.enterprise.quadrant();
         self.quadrants[(q.y - 1) as usize][(q.x - 1) as usize].klingons -= 1;
     }
 
     /// Update the quadrant's starbase count after removing one.
     pub fn decrement_quadrant_starbases(&mut self) {
-        let q = self.enterprise.quadrant;
+        let q = self.enterprise.quadrant();
         self.quadrants[(q.y - 1) as usize][(q.x - 1) as usize].starbases -= 1;
     }
 
@@ -271,9 +431,9 @@ mod tests {
     #[test]
     fn new_galaxy_has_positive_klingons_and_starbases() {
         let galaxy = Galaxy::new(0);
-        assert!(galaxy.total_klingons > 0, "must have at least one Klingon");
+        assert!(galaxy.total_klingons() > 0, "must have at least one Klingon");
         assert!(
-            galaxy.total_starbases > 0,
+            galaxy.total_starbases() > 0,
             "must have at least one starbase"
         );
     }
@@ -281,7 +441,7 @@ mod tests {
     #[test]
     fn initial_klingons_equals_total_klingons() {
         let galaxy = Galaxy::new(42);
-        assert_eq!(galaxy.initial_klingons, galaxy.total_klingons);
+        assert_eq!(galaxy.initial_klingons(), galaxy.total_klingons());
     }
 
     #[test]
@@ -289,11 +449,11 @@ mod tests {
         for seed in 0..20 {
             let galaxy = Galaxy::new(seed);
             assert_eq!(
-                galaxy.stardate % 100.0,
+                galaxy.stardate() % 100.0,
                 0.0,
                 "seed {}: stardate {} should be a multiple of 100",
                 seed,
-                galaxy.stardate
+                galaxy.stardate()
             );
         }
     }
@@ -303,10 +463,10 @@ mod tests {
         for seed in 0..20 {
             let galaxy = Galaxy::new(seed);
             assert!(
-                galaxy.stardate >= 2000.0 && galaxy.stardate <= 3900.0,
+                galaxy.stardate() >= 2000.0 && galaxy.stardate() <= 3900.0,
                 "seed {}: stardate {} out of range [2000, 3900]",
                 seed,
-                galaxy.stardate
+                galaxy.stardate()
             );
         }
     }
@@ -314,15 +474,15 @@ mod tests {
     #[test]
     fn mission_duration_is_30() {
         let galaxy = Galaxy::new(0);
-        assert_eq!(galaxy.mission_duration, MISSION_DURATION);
+        assert_eq!(galaxy.mission_duration(), MISSION_DURATION);
     }
 
     #[test]
     fn enterprise_position_in_valid_range() {
         for seed in 0..20 {
             let galaxy = Galaxy::new(seed);
-            let q = galaxy.enterprise.quadrant;
-            let s = galaxy.enterprise.sector;
+            let q = galaxy.enterprise.quadrant();
+            let s = galaxy.enterprise.sector();
             assert!(q.x >= 1 && q.x <= 8, "quadrant x out of range");
             assert!(q.y >= 1 && q.y <= 8, "quadrant y out of range");
             assert!(s.x >= 1 && s.x <= 8, "sector x out of range");
@@ -333,9 +493,9 @@ mod tests {
     #[test]
     fn enterprise_starts_with_full_resources() {
         let galaxy = Galaxy::new(0);
-        assert_eq!(galaxy.enterprise.energy, INITIAL_ENERGY);
-        assert_eq!(galaxy.enterprise.torpedoes, INITIAL_TORPEDOES);
-        assert_eq!(galaxy.enterprise.shields, INITIAL_SHIELDS);
+        assert_eq!(galaxy.enterprise.energy(), INITIAL_ENERGY);
+        assert_eq!(galaxy.enterprise.torpedoes(), INITIAL_TORPEDOES);
+        assert_eq!(galaxy.enterprise.shields(), INITIAL_SHIELDS);
     }
 
     #[test]
@@ -349,7 +509,7 @@ mod tests {
                 sum += k;
             }
         }
-        assert_eq!(sum, galaxy.total_klingons);
+        assert_eq!(sum, galaxy.total_klingons());
     }
 
     #[test]
@@ -363,7 +523,7 @@ mod tests {
                 sum += b;
             }
         }
-        assert_eq!(sum, galaxy.total_starbases);
+        assert_eq!(sum, galaxy.total_starbases());
     }
 
     #[test]
@@ -380,17 +540,17 @@ mod tests {
     #[test]
     fn computer_memory_starts_unscanned_except_starting_quadrant() {
         let galaxy = Galaxy::new(0);
-        let qx = galaxy.enterprise.quadrant.x;
-        let qy = galaxy.enterprise.quadrant.y;
+        let qx = galaxy.enterprise.quadrant().x;
+        let qy = galaxy.enterprise.quadrant().y;
         for y in 0..GALAXY_SIZE {
             for x in 0..GALAXY_SIZE {
                 if x == (qx - 1) as usize && y == (qy - 1) as usize {
                     // Starting quadrant should be recorded
-                    let expected = galaxy.quadrants[y][x].encoded();
-                    assert_eq!(galaxy.computer_memory[y][x], expected);
+                    let expected = galaxy.quadrants[y][x];
+                    assert_eq!(galaxy.computer_memory[y][x], Some(expected));
                 } else {
                     // All other quadrants should be unscanned
-                    assert_eq!(galaxy.computer_memory[y][x], -1);
+                    assert_eq!(galaxy.computer_memory[y][x], None);
                 }
             }
         }
@@ -399,14 +559,14 @@ mod tests {
     #[test]
     fn sector_map_has_enterprise_after_init() {
         let galaxy = Galaxy::new(42);
-        let content = galaxy.sector_map.get(galaxy.enterprise.sector);
+        let content = galaxy.sector_map.get(galaxy.enterprise.sector());
         assert_eq!(content, SectorContent::Enterprise);
     }
 
     #[test]
     fn sector_map_entity_counts_match_quadrant_data() {
         let galaxy = Galaxy::new(42);
-        let q = galaxy.enterprise.quadrant;
+        let q = galaxy.enterprise.quadrant();
         let qdata = galaxy.quadrants[(q.y - 1) as usize][(q.x - 1) as usize];
 
         assert_eq!(
@@ -438,10 +598,10 @@ mod tests {
         let g1 = Galaxy::new(123);
         let g2 = Galaxy::new(123);
         assert_eq!(g1.stardate, g2.stardate);
-        assert_eq!(g1.total_klingons, g2.total_klingons);
+        assert_eq!(g1.total_klingons(), g2.total_klingons());
         assert_eq!(g1.total_starbases, g2.total_starbases);
-        assert_eq!(g1.enterprise.quadrant, g2.enterprise.quadrant);
-        assert_eq!(g1.enterprise.sector, g2.enterprise.sector);
+        assert_eq!(g1.enterprise.quadrant(), g2.enterprise.quadrant());
+        assert_eq!(g1.enterprise.sector(), g2.enterprise.sector());
     }
 
     #[test]
@@ -450,8 +610,8 @@ mod tests {
         let g2 = Galaxy::new(2);
         // At least one of these should differ
         let same = g1.stardate == g2.stardate
-            && g1.total_klingons == g2.total_klingons
-            && g1.enterprise.quadrant == g2.enterprise.quadrant;
+            && g1.total_klingons() == g2.total_klingons()
+            && g1.enterprise.quadrant() == g2.enterprise.quadrant();
         assert!(!same, "different seeds should produce different state");
     }
 
@@ -463,11 +623,12 @@ mod tests {
     fn condition_green_no_klingons_full_energy() {
         let mut galaxy = Galaxy::new(42);
         galaxy.sector_map = SectorMap::new();
-        galaxy.enterprise.sector = SectorPosition { x: 4, y: 4 };
+        let sector = SectorPosition { x: 4, y: 4 };
+        galaxy.enterprise.move_to(galaxy.enterprise.quadrant(), sector);
         galaxy
             .sector_map
-            .set(galaxy.enterprise.sector, SectorContent::Enterprise);
-        galaxy.enterprise.energy = INITIAL_ENERGY;
+            .set(galaxy.enterprise.sector(), SectorContent::Enterprise);
+        galaxy.enterprise.set_energy(INITIAL_ENERGY);
 
         assert_eq!(galaxy.evaluate_condition(), Condition::Green);
     }
@@ -476,11 +637,12 @@ mod tests {
     fn condition_yellow_low_energy() {
         let mut galaxy = Galaxy::new(42);
         galaxy.sector_map = SectorMap::new();
-        galaxy.enterprise.sector = SectorPosition { x: 4, y: 4 };
+        let sector = SectorPosition { x: 4, y: 4 };
+        galaxy.enterprise.move_to(galaxy.enterprise.quadrant(), sector);
         galaxy
             .sector_map
-            .set(galaxy.enterprise.sector, SectorContent::Enterprise);
-        galaxy.enterprise.energy = INITIAL_ENERGY * 0.05; // below 10%
+            .set(galaxy.enterprise.sector(), SectorContent::Enterprise);
+        galaxy.enterprise.set_energy(INITIAL_ENERGY * 0.05); // below 10%
 
         assert_eq!(galaxy.evaluate_condition(), Condition::Yellow);
     }
@@ -489,10 +651,11 @@ mod tests {
     fn condition_red_klingons_present() {
         let mut galaxy = Galaxy::new(42);
         galaxy.sector_map = SectorMap::new();
-        galaxy.enterprise.sector = SectorPosition { x: 4, y: 4 };
+        let sector = SectorPosition { x: 4, y: 4 };
+        galaxy.enterprise.move_to(galaxy.enterprise.quadrant(), sector);
         galaxy
             .sector_map
-            .set(galaxy.enterprise.sector, SectorContent::Enterprise);
+            .set(galaxy.enterprise.sector(), SectorContent::Enterprise);
         // Add a Klingon
         let kpos = SectorPosition { x: 1, y: 1 };
         galaxy.sector_map.set(kpos, SectorContent::Klingon);
@@ -511,7 +674,7 @@ mod tests {
     ) -> Galaxy {
         let mut galaxy = Galaxy::new(42);
         galaxy.sector_map = SectorMap::new();
-        galaxy.enterprise.sector = enterprise_sector;
+        galaxy.enterprise.move_to(galaxy.enterprise.quadrant(), enterprise_sector);
         galaxy
             .sector_map
             .set(enterprise_sector, SectorContent::Enterprise);
@@ -534,7 +697,7 @@ mod tests {
     #[test]
     fn render_row_shows_enterprise_symbol() {
         let galaxy = Galaxy::new(42);
-        let ey = galaxy.enterprise.sector.y;
+        let ey = galaxy.enterprise.sector().y;
         let row = galaxy.sector_map.render_row(ey);
         assert!(
             row.contains("<*>"),
@@ -565,7 +728,7 @@ mod tests {
     #[test]
     fn is_victory_when_no_klingons() {
         let mut galaxy = Galaxy::new(42);
-        galaxy.total_klingons = 0;
+        galaxy.set_total_klingons(0);
         assert!(galaxy.is_victory());
     }
 
@@ -573,15 +736,15 @@ mod tests {
     fn not_victory_when_klingons_remain() {
         let galaxy = Galaxy::new(42);
         assert!(!galaxy.is_victory());
-        assert!(galaxy.total_klingons > 0);
+        assert!(galaxy.total_klingons() > 0);
     }
 
     #[test]
     fn efficiency_rating_calculation() {
         let mut galaxy = Galaxy::new(42);
-        galaxy.initial_klingons = 15;
-        galaxy.starting_stardate = 2000.0;
-        galaxy.stardate = 2010.0; // elapsed = 10
+        galaxy.set_initial_klingons(15);
+        galaxy.set_stardate(2010.0);
+        galaxy.set_starting_stardate(2000.0);
         // (15 / 10) * 1000 = 1500
         assert_eq!(galaxy.efficiency_rating(), 1500);
     }
@@ -589,9 +752,9 @@ mod tests {
     #[test]
     fn efficiency_rating_truncates_to_integer() {
         let mut galaxy = Galaxy::new(42);
-        galaxy.initial_klingons = 17;
-        galaxy.starting_stardate = 2000.0;
-        galaxy.stardate = 2007.0; // elapsed = 7
+        galaxy.set_initial_klingons(17);
+        galaxy.set_stardate(2007.0);
+        galaxy.set_starting_stardate(2000.0);
         // (17 / 7) * 1000 = 2428.571... truncated to 2428
         assert_eq!(galaxy.efficiency_rating(), 2428);
     }
@@ -599,7 +762,7 @@ mod tests {
     #[test]
     fn decrement_quadrant_klingons_updates_count() {
         let mut galaxy = Galaxy::new(42);
-        let q = galaxy.enterprise.quadrant;
+        let q = galaxy.enterprise.quadrant();
         let initial_count = galaxy.quadrants[(q.y - 1) as usize][(q.x - 1) as usize].klingons;
 
         galaxy.decrement_quadrant_klingons();
