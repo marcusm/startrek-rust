@@ -1,37 +1,42 @@
-use std::io::{self, Write};
-
+use crate::io::{InputReader, OutputWriter};
 use crate::models::constants::{Device, GALAXY_SIZE};
+use crate::models::errors::GameResult;
 use crate::models::galaxy::Galaxy;
 use crate::models::position::SectorPosition;
 
 /// Library Computer — Command 7 (spec section 6.7).
-pub fn library_computer(galaxy: &mut Galaxy) {
+pub fn library_computer(
+    galaxy: &mut Galaxy,
+    io: &mut dyn InputReader,
+    output: &mut dyn OutputWriter,
+) -> GameResult<()> {
     if galaxy.enterprise.is_damaged(Device::Computer) {
-        println!("COMPUTER DISABLED");
-        return;
+        output.writeln("COMPUTER DISABLED");
+        return Ok(());
     }
 
-    println!("COMPUTER ACTIVE AND AWAITING COMMAND");
-    let input = read_line("");
+    output.writeln("COMPUTER ACTIVE AND AWAITING COMMAND");
+    let input = io.read_line("")?;
     let input = input.trim();
 
     match input {
-        "0" => cumulative_galactic_record(galaxy),
-        "1" => status_report(galaxy),
-        "2" => photon_torpedo_data(galaxy),
-        _ => print_computer_menu(),
+        "0" => cumulative_galactic_record(galaxy, output),
+        "1" => status_report(galaxy, output),
+        "2" => photon_torpedo_data(galaxy, io, output)?,
+        _ => print_computer_menu(output),
     }
+    Ok(())
 }
 
 /// Option 0 — Cumulative Galactic Record (spec section 6.7).
-fn cumulative_galactic_record(galaxy: &Galaxy) {
+fn cumulative_galactic_record(galaxy: &Galaxy, output: &mut dyn OutputWriter) {
     let qx = galaxy.enterprise.quadrant.x;
     let qy = galaxy.enterprise.quadrant.y;
-    println!("COMPUTER RECORD OF GALAXY FOR QUADRANT {},{}", qx, qy);
+    output.writeln(&format!("COMPUTER RECORD OF GALAXY FOR QUADRANT {},{}", qx, qy));
 
     let border = "-------------------------------------------------";
     for y in 0..GALAXY_SIZE {
-        println!("{}", border);
+        output.writeln(&border);
         let mut cells: Vec<String> = Vec::new();
         for x in 0..GALAXY_SIZE {
             let val = galaxy.computer_memory[y][x];
@@ -41,32 +46,36 @@ fn cumulative_galactic_record(galaxy: &Galaxy) {
                 cells.push(format!("{:03}", val));
             }
         }
-        println!(
+        output.writeln(&format!(
             "| {} | {} | {} | {} | {} | {} | {} | {} |",
             cells[0], cells[1], cells[2], cells[3], cells[4], cells[5], cells[6], cells[7]
-        );
+        ));
     }
-    println!("{}", border);
+    output.writeln(&border);
 }
 
 /// Option 1 — Status Report (spec section 6.7).
 /// Prints status info then falls through to the damage control report.
-fn status_report(galaxy: &Galaxy) {
-    println!("   STATUS REPORT");
-    println!();
-    println!("NUMBER OF KLINGONS LEFT  = {}", galaxy.total_klingons);
+fn status_report(galaxy: &Galaxy, output: &mut dyn OutputWriter) {
+    output.writeln("   STATUS REPORT");
+    output.writeln("");
+    output.writeln(&format!("NUMBER OF KLINGONS LEFT  = {}", galaxy.total_klingons));
     let stardates_left =
         (galaxy.starting_stardate + galaxy.mission_duration) - galaxy.stardate;
-    println!("NUMBER OF STARDATES LEFT = {}", stardates_left as i32);
-    println!("NUMBER OF STARBASES LEFT = {}", galaxy.total_starbases);
+    output.writeln(&format!("NUMBER OF STARDATES LEFT = {}", stardates_left as i32));
+    output.writeln(&format!("NUMBER OF STARBASES LEFT = {}", galaxy.total_starbases));
 
     // Falls through to damage control report (spec section 6.7)
-    galaxy.enterprise.damage_report();
+    galaxy.enterprise.damage_report(output);
 }
 
 /// Option 2 — Photon Torpedo Data (spec section 6.7).
 /// Displays direction and distance to each Klingon, then offers calculator.
-fn photon_torpedo_data(galaxy: &Galaxy) {
+fn photon_torpedo_data(
+    galaxy: &Galaxy,
+    io: &mut dyn InputReader,
+    output: &mut dyn OutputWriter,
+) -> GameResult<()> {
     // Display data for each living Klingon
     for klingon in &galaxy.sector_map.klingons {
         if !klingon.is_alive() {
@@ -78,34 +87,39 @@ fn photon_torpedo_data(galaxy: &Galaxy) {
             klingon.sector,
         );
 
-        println!("DIRECTION = {:.2}", direction);
-        println!("DISTANCE  = {:.2}", distance);
+        output.writeln(&format!("DIRECTION = {:.2}", direction));
+        output.writeln(&format!("DISTANCE  = {:.2}", distance));
     }
 
     // Calculator option
-    println!("ENTER 1 TO USE THE CALCULATOR");
-    let input = read_line("");
+    output.writeln("ENTER 1 TO USE THE CALCULATOR");
+    let input = io.read_line("")?;
     if input.trim() == "1" {
-        use_calculator(galaxy);
+        use_calculator(galaxy, io, output)?;
     }
+    Ok(())
 }
 
 /// Calculator sub-feature of photon torpedo data (spec section 6.7).
 /// Allows player to calculate direction/distance between any two coordinates.
-fn use_calculator(galaxy: &Galaxy) {
-    println!(
+fn use_calculator(
+    galaxy: &Galaxy,
+    io: &mut dyn InputReader,
+    output: &mut dyn OutputWriter,
+) -> GameResult<()> {
+    output.writeln(&format!(
         "YOU ARE AT QUADRANT {},{} SECTOR {},{}",
         galaxy.enterprise.quadrant.x,
         galaxy.enterprise.quadrant.y,
         galaxy.enterprise.sector.x,
         galaxy.enterprise.sector.y
-    );
-    println!("SHIP'S & TARGET'S COORDINATES ARE");
+    ));
+    output.writeln("SHIP'S & TARGET'S COORDINATES ARE");
 
-    let input = read_line("");
+    let input = io.read_line("")?;
     let coords: Vec<&str> = input.trim().split(',').collect();
     if coords.len() != 4 {
-        return;
+        return Ok(());
     }
 
     let source_x: i32 = coords[0].trim().parse().unwrap_or(0);
@@ -124,13 +138,14 @@ fn use_calculator(galaxy: &Galaxy) {
 
     let (direction, distance) = calculate_direction_and_distance(source, target);
 
-    println!("DIRECTION = {:.2}", direction);
-    println!("DISTANCE  = {:.2}", distance);
+    output.writeln(&format!("DIRECTION = {:.2}", direction));
+    output.writeln(&format!("DISTANCE  = {:.2}", distance));
 
     // Warp units calculation (max of absolute deltas)
     let warp_units = ((target_x - source_x).abs()).max((target_y - source_y).abs());
     let plural = if warp_units != 1 { "S" } else { "" };
-    println!("   ({} WARP UNIT{})", warp_units, plural);
+    output.writeln(&format!("   ({} WARP UNIT{})", warp_units, plural));
+    Ok(())
 }
 
 /// Direction and distance calculation (spec section 7.4).
@@ -186,26 +201,17 @@ fn calculate_direction_and_distance(
     (direction, distance)
 }
 
-fn print_computer_menu() {
-    println!("FUNCTIONS AVAILABLE FROM COMPUTER");
-    println!("   0 = CUMULATIVE GALACTIC RECORD");
-    println!("   1 = STATUS REPORT");
-    println!("   2 = PHOTON TORPEDO DATA");
-}
-
-fn read_line(prompt: &str) -> String {
-    if !prompt.is_empty() {
-        print!("{} ", prompt);
-    }
-    io::stdout().flush().unwrap();
-    let mut input = String::new();
-    io::stdin().read_line(&mut input).unwrap();
-    input
+fn print_computer_menu(output: &mut dyn OutputWriter) {
+    output.writeln("FUNCTIONS AVAILABLE FROM COMPUTER");
+    output.writeln("   0 = CUMULATIVE GALACTIC RECORD");
+    output.writeln("   1 = STATUS REPORT");
+    output.writeln("   2 = PHOTON TORPEDO DATA");
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::io::test_utils::MockOutput;
     use crate::models::constants::Device;
     use crate::models::galaxy::Galaxy;
 
@@ -282,7 +288,7 @@ mod tests {
     fn status_report_displays_without_panic() {
         let galaxy = Galaxy::new(99);
         // Verify the function runs without panicking (output goes to stdout)
-        status_report(&galaxy);
+        status_report(&galaxy, &mut MockOutput::new());
     }
 
     #[test]
@@ -291,7 +297,7 @@ mod tests {
         // Damage a device so we can verify the damage report portion runs
         galaxy.enterprise.devices[Device::WarpEngines as usize] = -2.0;
         // Should not panic — status report prints then falls through to damage_report
-        status_report(&galaxy);
+        status_report(&galaxy, &mut MockOutput::new());
     }
 
     #[test]
@@ -299,7 +305,7 @@ mod tests {
         let mut galaxy = Galaxy::new(99);
         galaxy.enterprise.devices[Device::DamageControl as usize] = -1.0;
         // The fall-through damage report should print "not available" but not panic
-        status_report(&galaxy);
+        status_report(&galaxy, &mut MockOutput::new());
     }
 
     // --- Photon Torpedo Data Tests (Option 2) ---

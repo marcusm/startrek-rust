@@ -1,9 +1,9 @@
-use std::io::{self, Write};
-
 use rand::Rng;
 
+use crate::io::{InputReader, OutputWriter};
 use crate::models::constants::{Device, SectorContent};
 use crate::models::enterprise::ShieldControlError;
+use crate::models::errors::{GameError, GameResult};
 use crate::models::galaxy::Galaxy;
 use crate::models::position::SectorPosition;
 use crate::services::navigation;
@@ -17,23 +17,23 @@ pub fn calculate_distance(from: SectorPosition, to: SectorPosition) -> f64 {
 
 /// Check preconditions for firing phasers.
 /// Returns (can_fire, computer_damaged).
-fn check_phaser_readiness(galaxy: &Galaxy) -> (bool, bool) {
+fn check_phaser_readiness(galaxy: &Galaxy, output: &mut dyn OutputWriter) -> (bool, bool) {
     // Check for Klingons in quadrant
     if galaxy.sector_map.klingons.is_empty() {
-        println!("SHORT RANGE SENSORS REPORT NO KLINGONS IN THIS QUADRANT");
+        output.writeln("SHORT RANGE SENSORS REPORT NO KLINGONS IN THIS QUADRANT");
         return (false, false);
     }
 
     // Check if Phaser Control is damaged
     if galaxy.enterprise.is_damaged(Device::PhaserControl) {
-        println!("PHASER CONTROL IS DISABLED");
+        output.writeln("PHASER CONTROL IS DISABLED");
         return (false, false);
     }
 
     // Check if Computer is damaged (affects accuracy)
     let computer_damaged = galaxy.enterprise.is_damaged(Device::Computer);
     if computer_damaged {
-        println!(" COMPUTER FAILURE HAMPERS ACCURACY");
+        output.writeln(" COMPUTER FAILURE HAMPERS ACCURACY");
     }
 
     (true, computer_damaged)
@@ -41,26 +41,30 @@ fn check_phaser_readiness(galaxy: &Galaxy) -> (bool, bool) {
 
 /// Prompt for and validate phaser energy input.
 /// Returns Some(units) if valid, None if cancelled or invalid.
-fn read_and_validate_phaser_energy(available_energy: f64) -> Option<f64> {
-    println!(
+fn read_and_validate_phaser_energy(
+    available_energy: f64,
+    io: &mut dyn InputReader,
+    output: &mut dyn OutputWriter,
+) -> GameResult<Option<f64>> {
+    output.writeln(&format!(
         "PHASERS LOCKED ON TARGET.  ENERGY AVAILABLE = {}",
         available_energy as i32
-    );
-    let input = read_line("NUMBER OF UNITS TO FIRE");
+    ));
+    let input = io.read_line("NUMBER OF UNITS TO FIRE")?;
     let units: f64 = match input.trim().parse() {
         Ok(v) => v,
-        Err(_) => return None,
+        Err(_) => return Ok(None),
     };
 
     // Validate input
     if units <= 0.0 {
-        return None;
+        return Ok(None);
     }
     if available_energy - units < 0.0 {
-        return None;
+        return Ok(None);
     }
 
-    Some(units)
+    Ok(Some(units))
 }
 
 /// Apply computer damage degradation to phaser energy.
@@ -76,6 +80,7 @@ fn calculate_phaser_energy(units: f64, computer_damaged: bool, rng: &mut impl Rn
 fn apply_phaser_damage_to_klingons(
     galaxy: &mut Galaxy,
     phaser_energy: f64,
+    output: &mut dyn OutputWriter,
 ) -> Vec<SectorPosition> {
     // Count living Klingons for damage distribution
     let num_klingons = galaxy
@@ -104,11 +109,11 @@ fn apply_phaser_damage_to_klingons(
 
         klingon.shields -= hit;
 
-        println!(
+        output.writeln(&format!(
             "{} UNIT HIT ON KLINGON AT SECTOR {},{}",
             hit as i32, klingon.sector.x, klingon.sector.y
-        );
-        println!("   ({} LEFT)", klingon.shields.max(0.0) as i32);
+        ));
+        output.writeln(&format!("   ({} LEFT)", klingon.shields.max(0.0) as i32));
 
         // If Klingon destroyed, collect position for cleanup
         if !klingon.is_alive() {
@@ -120,10 +125,14 @@ fn apply_phaser_damage_to_klingons(
 }
 
 /// Clean up destroyed Klingons from all tracking structures.
-fn cleanup_destroyed_klingons(galaxy: &mut Galaxy, destroyed_positions: &[SectorPosition]) {
+fn cleanup_destroyed_klingons(
+    galaxy: &mut Galaxy,
+    destroyed_positions: &[SectorPosition],
+    output: &mut dyn OutputWriter,
+) {
     // Clean up destroyed Klingons
     for pos in destroyed_positions {
-        println!("*** KLINGON DESTROYED ***");
+        output.writeln("*** KLINGON DESTROYED ***");
         galaxy.sector_map.set(*pos, SectorContent::Empty);
         galaxy.total_klingons -= 1;
         galaxy.decrement_quadrant_klingons();
@@ -134,57 +143,62 @@ fn cleanup_destroyed_klingons(galaxy: &mut Galaxy, destroyed_positions: &[Sector
 }
 
 /// Check for victory condition after Klingon destruction.
-fn check_phaser_victory(galaxy: &mut Galaxy) {
+fn check_phaser_victory(galaxy: &mut Galaxy, output: &mut dyn OutputWriter) {
     if galaxy.is_victory() {
-        galaxy.end_victory();
+        galaxy.end_victory(output);
     }
 }
 
 /// Fire Phasers — Command 3 (spec section 6.3).
-pub fn fire_phasers(galaxy: &mut Galaxy) {
+pub fn fire_phasers(
+    galaxy: &mut Galaxy,
+    io: &mut dyn InputReader,
+    output: &mut dyn OutputWriter,
+) -> GameResult<()> {
     // Phase 1: Preconditions
-    let (can_fire, computer_damaged) = check_phaser_readiness(galaxy);
+    let (can_fire, computer_damaged) = check_phaser_readiness(galaxy, output);
     if !can_fire {
-        return;
+        return Ok(());
     }
 
     // Phase 2: Input
-    let units = match read_and_validate_phaser_energy(galaxy.enterprise.energy) {
+    let units = match read_and_validate_phaser_energy(galaxy.enterprise.energy, io, output)? {
         Some(u) => u,
-        None => return,
+        None => return Ok(()),
     };
 
     // Phase 3: Energy deduction
     galaxy.enterprise.energy -= units;
 
     // Phase 4: CRITICAL - Klingons fire BEFORE phaser damage (spec 8.1)
-    if klingons_fire(galaxy) {
-        return; // Enterprise destroyed
+    if klingons_fire(galaxy, output) {
+        return Ok(()); // Enterprise destroyed
     }
 
     // Phase 5: Apply phaser damage
     let phaser_energy = calculate_phaser_energy(units, computer_damaged, &mut galaxy.rng);
-    let destroyed = apply_phaser_damage_to_klingons(galaxy, phaser_energy);
+    let destroyed = apply_phaser_damage_to_klingons(galaxy, phaser_energy, output);
 
     // Phase 6: Cleanup
-    cleanup_destroyed_klingons(galaxy, &destroyed);
+    cleanup_destroyed_klingons(galaxy, &destroyed, output);
 
     // Phase 7: Victory check
-    check_phaser_victory(galaxy);
+    check_phaser_victory(galaxy, output);
+    Ok(())
 }
 
 /// Check preconditions for firing torpedoes (spec section 6.4).
 /// Returns true if ready to fire, false otherwise.
-fn check_torpedo_readiness(galaxy: &Galaxy) -> bool {
+fn check_torpedo_readiness(galaxy: &Galaxy, output: &mut dyn OutputWriter) -> bool {
     // Check if photon tubes are damaged
     if galaxy.enterprise.is_damaged(Device::PhotonTubes) {
-        println!("PHOTON TUBES ARE NOT OPERATIONAL");
+        output.writeln("PHOTON TUBES ARE NOT OPERATIONAL");
         return false;
     }
 
     // Check torpedo count
     if galaxy.enterprise.torpedoes <= 0 {
-        println!("ALL PHOTON TORPEDOES EXPENDED");
+        output.writeln("ALL PHOTON TORPEDOES EXPENDED");
         return false;
     }
 
@@ -193,20 +207,20 @@ fn check_torpedo_readiness(galaxy: &Galaxy) -> bool {
 
 /// Read and validate torpedo course input (spec section 6.4).
 /// Returns Some(course) if valid, None if cancelled.
-fn read_torpedo_course() -> Option<f64> {
+fn read_torpedo_course(io: &mut dyn InputReader) -> GameResult<Option<f64>> {
     loop {
-        let input = read_line("TORPEDO COURSE (1-9)");
+        let input = io.read_line("TORPEDO COURSE (1-9)")?;
         let course: f64 = match input.trim().parse() {
             Ok(v) => v,
             Err(_) => continue, // Invalid input, re-prompt
         };
 
         if course == 0.0 {
-            return None; // Cancel command
+            return Ok(None); // Cancel command
         }
 
         if course >= 1.0 && course < 9.0 {
-            return Some(course);
+            return Ok(Some(course));
         }
 
         // Out of range (< 1 or >= 9), re-prompt
@@ -214,8 +228,8 @@ fn read_torpedo_course() -> Option<f64> {
 }
 
 /// Handle Klingon hit by torpedo (spec section 6.4).
-fn handle_klingon_hit(galaxy: &mut Galaxy, pos: SectorPosition) {
-    println!("*** KLINGON DESTROYED ***");
+fn handle_klingon_hit(galaxy: &mut Galaxy, pos: SectorPosition, output: &mut dyn OutputWriter) {
+    output.writeln("*** KLINGON DESTROYED ***");
 
     // Remove from sector map
     galaxy.sector_map.set(pos, SectorContent::Empty);
@@ -231,13 +245,13 @@ fn handle_klingon_hit(galaxy: &mut Galaxy, pos: SectorPosition) {
 
     // Check victory condition
     if galaxy.is_victory() {
-        galaxy.end_victory();
+        galaxy.end_victory(output);
     }
 }
 
 /// Handle starbase hit by torpedo (spec section 6.4).
-fn handle_starbase_hit(galaxy: &mut Galaxy, pos: SectorPosition) {
-    println!("*** STAR BASE DESTROYED ***  .......CONGRATULATIONS");
+fn handle_starbase_hit(galaxy: &mut Galaxy, pos: SectorPosition, output: &mut dyn OutputWriter) {
+    output.writeln("*** STAR BASE DESTROYED ***  .......CONGRATULATIONS");
 
     // Clear from sector map
     galaxy.sector_map.set(pos, SectorContent::Empty);
@@ -251,7 +265,7 @@ fn handle_starbase_hit(galaxy: &mut Galaxy, pos: SectorPosition) {
 }
 
 /// Fire torpedo along trajectory and check for hits (spec section 6.4).
-fn fire_torpedo_trajectory(galaxy: &mut Galaxy, course: f64) {
+fn fire_torpedo_trajectory(galaxy: &mut Galaxy, course: f64, output: &mut dyn OutputWriter) {
     // Calculate direction vector using navigation's interpolation
     let (dx, dy) = navigation::calculate_direction(course);
 
@@ -259,7 +273,7 @@ fn fire_torpedo_trajectory(galaxy: &mut Galaxy, course: f64) {
     let mut x = galaxy.enterprise.sector.x as f64;
     let mut y = galaxy.enterprise.sector.y as f64;
 
-    println!("TORPEDO TRACK:");
+    output.writeln("TORPEDO TRACK:");
 
     // Travel sector-by-sector
     loop {
@@ -268,12 +282,12 @@ fn fire_torpedo_trajectory(galaxy: &mut Galaxy, course: f64) {
 
         // Boundary check: outside quadrant?
         if x < 0.5 || x >= 8.5 || y < 0.5 || y >= 8.5 {
-            println!("TORPEDO MISSED");
+            output.writeln("TORPEDO MISSED");
             return;
         }
 
         // Print current position as truncated integers
-        println!("{},{}", x as i32, y as i32);
+        output.writeln(&format!("{},{}", x as i32, y as i32));
 
         // Check sector at rounded position
         let check_x = (x + 0.5).floor() as i32;
@@ -287,15 +301,15 @@ fn fire_torpedo_trajectory(galaxy: &mut Galaxy, course: f64) {
         match galaxy.sector_map.get(check_pos) {
             SectorContent::Empty => continue, // Keep traveling
             SectorContent::Klingon => {
-                handle_klingon_hit(galaxy, check_pos);
+                handle_klingon_hit(galaxy, check_pos, output);
                 return;
             }
             SectorContent::Star => {
-                println!("YOU CAN'T DESTROY STARS SILLY");
+                output.writeln("YOU CAN'T DESTROY STARS SILLY");
                 return;
             }
             SectorContent::Starbase => {
-                handle_starbase_hit(galaxy, check_pos);
+                handle_starbase_hit(galaxy, check_pos, output);
                 return;
             }
             SectorContent::Enterprise => {
@@ -307,39 +321,44 @@ fn fire_torpedo_trajectory(galaxy: &mut Galaxy, course: f64) {
 }
 
 /// Fire Photon Torpedoes — Command 4 (spec section 6.4).
-pub fn fire_torpedoes(galaxy: &mut Galaxy) {
+pub fn fire_torpedoes(
+    galaxy: &mut Galaxy,
+    io: &mut dyn InputReader,
+    output: &mut dyn OutputWriter,
+) -> GameResult<()> {
     // Phase 1: Check preconditions
-    if !check_torpedo_readiness(galaxy) {
-        return;
+    if !check_torpedo_readiness(galaxy, output) {
+        return Ok(());
     }
 
     // Phase 2: Get course input (0 = cancel)
-    let course = match read_torpedo_course() {
+    let course = match read_torpedo_course(io)? {
         Some(c) => c,
-        None => return,
+        None => return Ok(()),
     };
 
     // Phase 3: Deduct torpedo BEFORE firing (spec step 2)
     galaxy.enterprise.torpedoes -= 1;
 
     // Phase 4: Fire along trajectory
-    fire_torpedo_trajectory(galaxy, course);
+    fire_torpedo_trajectory(galaxy, course, output);
 
     // Phase 5: Klingons fire back (after torpedo resolution, spec 8.1)
-    if klingons_fire(galaxy) {
-        return; // Enterprise destroyed
+    if klingons_fire(galaxy, output) {
+        return Ok(()); // Enterprise destroyed
     }
+    Ok(())
 }
 
 /// Klingons attack the Enterprise (spec section 8).
 /// Returns true if the Enterprise is destroyed, false otherwise.
-pub fn klingons_fire(galaxy: &mut Galaxy) -> bool {
+pub fn klingons_fire(galaxy: &mut Galaxy, output: &mut dyn OutputWriter) -> bool {
     // Skip if docked (spec section 8.3)
     if galaxy
         .enterprise
         .is_adjacent_to_starbase(galaxy.sector_map.starbase)
     {
-        println!("STAR BASE SHIELDS PROTECT THE ENTERPRISE");
+        output.writeln("STAR BASE SHIELDS PROTECT THE ENTERPRISE");
         return false;
     }
 
@@ -355,19 +374,19 @@ pub fn klingons_fire(galaxy: &mut Galaxy) -> bool {
 
         galaxy.enterprise.shields -= hit;
 
-        println!(
+        output.writeln(&format!(
             "{} UNIT HIT ON ENTERPRISE FROM SECTOR {},{}",
             hit as i32, klingon.sector.x, klingon.sector.y
-        );
-        println!(
+        ));
+        output.writeln(&format!(
             "   ({} LEFT)",
             galaxy.enterprise.shields.max(0.0) as i32
-        );
+        ));
     }
 
     // Check if Enterprise is destroyed (spec section 8.4)
     if galaxy.enterprise.shields < 0.0 {
-        galaxy.end_defeat();
+        galaxy.end_defeat(output);
         return true; // unreachable due to exit, but explicit
     }
 
@@ -376,27 +395,31 @@ pub fn klingons_fire(galaxy: &mut Galaxy) -> bool {
 
 /// Shield control command (Command 5, spec section 6.5).
 /// Allows the player to transfer energy between shields and main energy reserves.
-pub fn shield_control(galaxy: &mut Galaxy) {
+pub fn shield_control(
+    galaxy: &mut Galaxy,
+    io: &mut dyn InputReader,
+    output: &mut dyn OutputWriter,
+) -> GameResult<()> {
     // Check if shield control is damaged (spec section 6.5)
     if galaxy.enterprise.is_damaged(Device::ShieldControl) {
-        println!("SHIELD CONTROL IS NON-OPERATIONAL");
-        return;
+        output.writeln("SHIELD CONTROL IS NON-OPERATIONAL");
+        return Ok(());
     }
 
     // Display available energy (energy + shields)
     let total_energy = galaxy.enterprise.energy + galaxy.enterprise.shields;
-    println!("ENERGY AVAILABLE = {}", total_energy as i32);
+    output.writeln(&format!("ENERGY AVAILABLE = {}", total_energy as i32));
 
     // Prompt for input
-    let input = read_line("NUMBER OF UNITS TO SHIELDS");
+    let input = io.read_line("NUMBER OF UNITS TO SHIELDS")?;
     let units: f64 = match input.trim().parse() {
         Ok(v) => v,
-        Err(_) => return, // Invalid parse, return to command prompt
+        Err(_) => return Ok(()), // Invalid parse, return to command prompt
     };
 
     // If input ≤ 0, return to command prompt (spec section 6.5)
     if units <= 0.0 {
-        return;
+        return Ok(());
     }
 
     // Attempt to transfer energy
@@ -405,8 +428,11 @@ pub fn shield_control(galaxy: &mut Galaxy) {
             // Success - energy transferred, return to command prompt
         }
         Err(ShieldControlError::InsufficientEnergy) => {
-            // Re-prompt by calling shield_control recursively
-            shield_control(galaxy);
+            // Return error instead of recursion - caller will handle retry
+            return Err(GameError::InsufficientResources {
+                required: units,
+                available: total_energy,
+            });
         }
         Err(ShieldControlError::InvalidInput) => {
             // Return to command prompt
@@ -415,19 +441,14 @@ pub fn shield_control(galaxy: &mut Galaxy) {
             // Should never happen - we checked above
         }
     }
+    Ok(())
 }
 
-fn read_line(prompt: &str) -> String {
-    print!("{} ", prompt);
-    io::stdout().flush().unwrap();
-    let mut input = String::new();
-    io::stdin().read_line(&mut input).unwrap();
-    input
-}
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::io::test_utils::MockOutput;
     use crate::models::constants::SectorContent;
     use crate::models::galaxy::Galaxy;
     use crate::models::klingon::Klingon;
@@ -501,7 +522,7 @@ mod tests {
         let mut galaxy = setup_combat_scenario(42, 3000.0, 500.0, 200.0);
         let initial_shields = galaxy.enterprise.shields;
 
-        klingons_fire(&mut galaxy);
+        klingons_fire(&mut galaxy, &mut MockOutput::new());
 
         assert!(galaxy.enterprise.shields < initial_shields);
     }
@@ -516,7 +537,7 @@ mod tests {
         galaxy.sector_map.starbase = Some(starbase_pos);
 
         let initial_shields = galaxy.enterprise.shields;
-        klingons_fire(&mut galaxy);
+        klingons_fire(&mut galaxy, &mut MockOutput::new());
 
         assert_eq!(galaxy.enterprise.shields, initial_shields);
     }
@@ -527,7 +548,7 @@ mod tests {
         galaxy.sector_map.klingons[0].shields = 0.0;
 
         let initial_shields = galaxy.enterprise.shields;
-        klingons_fire(&mut galaxy);
+        klingons_fire(&mut galaxy, &mut MockOutput::new());
 
         // Shields should not change if all Klingons are dead
         assert_eq!(galaxy.enterprise.shields, initial_shields);
@@ -555,8 +576,8 @@ mod tests {
         galaxy2.sector_map.set(far_klingon_pos, SectorContent::Klingon);
         galaxy2.sector_map.klingons.push(far_klingon);
 
-        klingons_fire(&mut galaxy1);
-        klingons_fire(&mut galaxy2);
+        klingons_fire(&mut galaxy1, &mut MockOutput::new());
+        klingons_fire(&mut galaxy2, &mut MockOutput::new());
 
         // Both have random component, but on average closer Klingon does more damage
         // We can only verify shields were reduced from both
@@ -635,7 +656,7 @@ mod tests {
         assert_eq!(galaxy.sector_map.klingons.len(), 3);
 
         // All Klingons fire
-        klingons_fire(&mut galaxy);
+        klingons_fire(&mut galaxy, &mut MockOutput::new());
 
         // Enterprise shields should be reduced by attacks from all 3
         assert!(galaxy.enterprise.shields < 500.0);
@@ -676,7 +697,7 @@ mod tests {
         let mut galaxy = setup_combat_scenario(42, 3000.0, 500.0, 200.0);
         galaxy.enterprise.devices[Device::PhotonTubes as usize] = -2.0;
 
-        assert!(!check_torpedo_readiness(&galaxy));
+        assert!(!check_torpedo_readiness(&galaxy, &mut MockOutput::new()));
     }
 
     #[test]
@@ -684,13 +705,13 @@ mod tests {
         let mut galaxy = setup_combat_scenario(42, 3000.0, 500.0, 200.0);
         galaxy.enterprise.torpedoes = 0;
 
-        assert!(!check_torpedo_readiness(&galaxy));
+        assert!(!check_torpedo_readiness(&galaxy, &mut MockOutput::new()));
     }
 
     #[test]
     fn torpedo_readiness_ok_when_ready() {
         let galaxy = setup_combat_scenario(42, 3000.0, 500.0, 200.0);
-        assert!(check_torpedo_readiness(&galaxy));
+        assert!(check_torpedo_readiness(&galaxy, &mut MockOutput::new()));
     }
 
     #[test]
@@ -706,7 +727,7 @@ mod tests {
         galaxy.sector_map.klingons.push(klingon);
 
         // Fire torpedo east (course 1.0)
-        fire_torpedo_trajectory(&mut galaxy, 1.0);
+        fire_torpedo_trajectory(&mut galaxy,1.0, &mut MockOutput::new());
 
         // Verify Klingon destroyed
         assert_eq!(galaxy.sector_map.klingons.len(), 0);
@@ -730,7 +751,7 @@ mod tests {
         galaxy.sector_map.klingons.push(klingon);
 
         // Fire torpedo east (course 1.0)
-        fire_torpedo_trajectory(&mut galaxy, 1.0);
+        fire_torpedo_trajectory(&mut galaxy,1.0, &mut MockOutput::new());
 
         // Verify star stopped torpedo, Klingon still alive
         assert_eq!(galaxy.sector_map.get(star_pos), SectorContent::Star);
@@ -752,7 +773,7 @@ mod tests {
         galaxy.sector_map.starbase = Some(starbase_pos);
 
         // Fire torpedo east (course 1.0)
-        fire_torpedo_trajectory(&mut galaxy, 1.0);
+        fire_torpedo_trajectory(&mut galaxy,1.0, &mut MockOutput::new());
 
         // Verify starbase destroyed
         assert_eq!(galaxy.sector_map.starbase, None);
@@ -766,7 +787,7 @@ mod tests {
         galaxy.sector_map.klingons.clear(); // No obstacles
 
         // Fire torpedo north (course 3.0) which will exit quadrant
-        fire_torpedo_trajectory(&mut galaxy, 3.0);
+        fire_torpedo_trajectory(&mut galaxy,3.0, &mut MockOutput::new());
 
         // Torpedo should miss (no crash, just returns)
         // Can't verify output but should not panic
@@ -784,7 +805,7 @@ mod tests {
         galaxy.sector_map.klingons.push(klingon);
 
         // Fire torpedo east (course 1.0) - should travel through (5,4), (6,4), (7,4)
-        fire_torpedo_trajectory(&mut galaxy, 1.0);
+        fire_torpedo_trajectory(&mut galaxy,1.0, &mut MockOutput::new());
 
         // Verify Klingon destroyed at the end of path
         assert_eq!(galaxy.sector_map.klingons.len(), 0);
@@ -803,7 +824,7 @@ mod tests {
         galaxy.sector_map.klingons.push(klingon);
 
         // Fire torpedo northeast with fractional course (course 2.0 is pure northeast)
-        fire_torpedo_trajectory(&mut galaxy, 2.0);
+        fire_torpedo_trajectory(&mut galaxy,2.0, &mut MockOutput::new());
 
         // Verify Klingon destroyed
         assert_eq!(galaxy.sector_map.klingons.len(), 0);
@@ -824,7 +845,7 @@ mod tests {
         galaxy.sector_map.klingons.push(klingon);
 
         // Fire east (course 1.0)
-        fire_torpedo_trajectory(&mut galaxy, 1.0);
+        fire_torpedo_trajectory(&mut galaxy,1.0, &mut MockOutput::new());
 
         // Star should stop torpedo, Klingon survives
         assert_eq!(galaxy.sector_map.get(star_pos), SectorContent::Star);
@@ -865,7 +886,7 @@ mod tests {
         galaxy.sector_map.set(klingon_pos, SectorContent::Klingon);
         galaxy.sector_map.klingons.push(klingon);
 
-        fire_torpedo_trajectory(&mut galaxy, 1.0);
+        fire_torpedo_trajectory(&mut galaxy,1.0, &mut MockOutput::new());
 
         // Klingon should be destroyed
         assert_eq!(galaxy.sector_map.klingons.len(), 0);
@@ -882,7 +903,7 @@ mod tests {
         galaxy.sector_map.set(klingon_pos, SectorContent::Klingon);
         galaxy.sector_map.klingons.push(klingon);
 
-        fire_torpedo_trajectory(&mut galaxy, 3.0);
+        fire_torpedo_trajectory(&mut galaxy,3.0, &mut MockOutput::new());
 
         // Klingon should be destroyed
         assert_eq!(galaxy.sector_map.klingons.len(), 0);
@@ -899,7 +920,7 @@ mod tests {
         galaxy.sector_map.set(klingon_pos, SectorContent::Klingon);
         galaxy.sector_map.klingons.push(klingon);
 
-        fire_torpedo_trajectory(&mut galaxy, 5.0);
+        fire_torpedo_trajectory(&mut galaxy,5.0, &mut MockOutput::new());
 
         // Klingon should be destroyed
         assert_eq!(galaxy.sector_map.klingons.len(), 0);
@@ -916,7 +937,7 @@ mod tests {
         galaxy.sector_map.set(klingon_pos, SectorContent::Klingon);
         galaxy.sector_map.klingons.push(klingon);
 
-        fire_torpedo_trajectory(&mut galaxy, 7.0);
+        fire_torpedo_trajectory(&mut galaxy,7.0, &mut MockOutput::new());
 
         // Klingon should be destroyed
         assert_eq!(galaxy.sector_map.klingons.len(), 0);

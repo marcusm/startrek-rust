@@ -48,16 +48,16 @@ impl Enterprise {
     /// Print the damage control report (spec section 6.6).
     /// If the Damage Control device is damaged, prints a failure message.
     /// Otherwise, lists all 8 devices and their repair states (truncated to integer).
-    pub fn damage_report(&self) {
+    pub fn damage_report(&self, output: &mut dyn crate::io::OutputWriter) {
         if self.is_damaged(Device::DamageControl) {
-            println!("DAMAGE CONTROL REPORT IS NOT AVAILABLE");
+            output.writeln("DAMAGE CONTROL REPORT IS NOT AVAILABLE");
             return;
         }
 
-        println!("{:<14}{}", "DEVICE", "STATE OF REPAIR");
+        output.writeln(&format!("{:<14}{}", "DEVICE", "STATE OF REPAIR"));
         for device in Device::ALL.iter() {
             let state = self.devices[*device as usize] as i32;
-            println!("{:<14}{}", device.name(), state);
+            output.writeln(&format!("{:<14}{}", device.name(), state));
         }
     }
 
@@ -114,6 +114,7 @@ pub enum ShieldControlError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::io::test_utils::MockOutput;
     use crate::models::constants::{INITIAL_ENERGY, INITIAL_SHIELDS, INITIAL_TORPEDOES};
     use crate::models::position::SectorPosition;
 
@@ -194,7 +195,7 @@ mod tests {
         let e = enterprise_at(SectorPosition { x: 1, y: 1 });
         // All devices at 0.0, DamageControl is not damaged, so report should work.
         // We just verify it doesn't panic. (Output goes to stdout.)
-        e.damage_report();
+        e.damage_report(&mut MockOutput::new());
     }
 
     #[test]
@@ -204,7 +205,7 @@ mod tests {
         e.devices[Device::DamageControl as usize] = -1.0;
         assert!(e.is_damaged(Device::DamageControl));
         // Should print the unavailable message and return early.
-        e.damage_report();
+        e.damage_report(&mut MockOutput::new());
     }
 
     #[test]
@@ -217,7 +218,7 @@ mod tests {
         e.devices[Device::Computer as usize] = -5.0;
         assert!(!e.is_damaged(Device::DamageControl));
         // Should still produce the report.
-        e.damage_report();
+        e.damage_report(&mut MockOutput::new());
     }
 
     #[test]
@@ -229,7 +230,7 @@ mod tests {
         // Truncation: -3.7 as i32 = -3, 2.9 as i32 = 2
         assert_eq!(e.devices[Device::WarpEngines as usize] as i32, -3);
         assert_eq!(e.devices[Device::PhaserControl as usize] as i32, 2);
-        e.damage_report();
+        e.damage_report(&mut MockOutput::new());
     }
 
     // Shield Control Tests (spec section 6.5)

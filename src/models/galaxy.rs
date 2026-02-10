@@ -227,20 +227,20 @@ impl Galaxy {
     }
 
     /// End the game with victory message and exit (spec section 10.1).
-    pub fn end_victory(&self) {
-        println!();
-        println!("THE LAST KLINGON BATTLE CRUISER IN THE GALAXY HAS BEEN DESTROYED");
-        println!("THE FEDERATION HAS BEEN SAVED !!!");
-        println!();
-        println!("YOUR EFFICIENCY RATING = {}", self.efficiency_rating());
+    pub fn end_victory(&self, output: &mut dyn crate::io::OutputWriter) {
+        output.writeln("");
+        output.writeln("THE LAST KLINGON BATTLE CRUISER IN THE GALAXY HAS BEEN DESTROYED");
+        output.writeln("THE FEDERATION HAS BEEN SAVED !!!");
+        output.writeln("");
+        output.writeln(&format!("YOUR EFFICIENCY RATING = {}", self.efficiency_rating()));
         std::process::exit(0);
     }
 
     /// End the game with defeat message and exit (spec section 10.2).
-    pub fn end_defeat(&self) {
-        println!();
-        println!("THE ENTERPRISE HAS BEEN DESTROYED. THE FEDERATION WILL BE CONQUERED");
-        println!("THERE ARE STILL {} KLINGON BATTLE CRUISERS", self.total_klingons);
+    pub fn end_defeat(&self, output: &mut dyn crate::io::OutputWriter) {
+        output.writeln("");
+        output.writeln("THE ENTERPRISE HAS BEEN DESTROYED. THE FEDERATION WILL BE CONQUERED");
+        output.writeln(&format!("THERE ARE STILL {} KLINGON BATTLE CRUISERS", self.total_klingons));
         std::process::exit(0);
     }
 

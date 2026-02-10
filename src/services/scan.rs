@@ -1,20 +1,22 @@
+use crate::io::OutputWriter;
 use crate::models::constants::{Device, GALAXY_SIZE, SECTOR_SIZE};
+use crate::models::errors::GameResult;
 use crate::models::galaxy::Galaxy;
 
 /// Long Range Sensor Scan — Command 2 (spec section 6.2).
-pub fn long_range_scan(galaxy: &mut Galaxy) {
+pub fn long_range_scan(galaxy: &mut Galaxy, output: &mut dyn OutputWriter) -> GameResult<()> {
     if galaxy.enterprise.is_damaged(Device::LongRangeSensors) {
-        println!("LONG RANGE SENSORS ARE INOPERABLE");
-        return;
+        output.writeln("LONG RANGE SENSORS ARE INOPERABLE");
+        return Ok(());
     }
 
     let qx = galaxy.enterprise.quadrant.x;
     let qy = galaxy.enterprise.quadrant.y;
-    println!("LONG RANGE SENSOR SCAN FOR QUADRANT {},{}", qx, qy);
+    output.writeln(&format!("LONG RANGE SENSOR SCAN FOR QUADRANT {},{}", qx, qy));
 
     let border = "-------------------";
     for dy in -1..=1_i32 {
-        println!("{}", border);
+        output.writeln(&border);
         let mut cells: Vec<String> = Vec::new();
         for dx in -1..=1_i32 {
             let scan_x = qx + dx;
@@ -29,19 +31,20 @@ pub fn long_range_scan(galaxy: &mut Galaxy) {
                 galaxy.record_quadrant_to_memory(scan_x, scan_y);
             }
         }
-        println!("| {} | {} | {} |", cells[0], cells[1], cells[2]);
+        output.writeln(&format!("| {} | {} | {} |", cells[0], cells[1], cells[2]));
     }
-    println!("{}", border);
+    output.writeln(&border);
+    Ok(())
 }
 
 /// Short Range Sensor Scan — Command 1 (spec section 6.1).
-pub fn short_range_scan(galaxy: &mut Galaxy) {
+pub fn short_range_scan(galaxy: &mut Galaxy, output: &mut dyn OutputWriter) -> GameResult<()> {
     galaxy.check_docking();
     let condition = galaxy.evaluate_condition();
 
     if galaxy.enterprise.is_damaged(Device::ShortRangeSensors) {
-        println!("*** SHORT RANGE SENSORS ARE OUT ***");
-        return;
+        output.writeln("*** SHORT RANGE SENSORS ARE OUT ***");
+        return Ok(());
     }
 
     let border = "-=--=--=--=--=--=--=--=-";
@@ -57,17 +60,18 @@ pub fn short_range_scan(galaxy: &mut Galaxy) {
         String::new(),
     ];
 
-    println!("{}", border);
+    output.writeln(&border);
     for y in 1..=SECTOR_SIZE as i32 {
         let row = galaxy.sector_map.render_row(y);
         let idx = (y - 1) as usize;
         if !status[idx].is_empty() {
-            println!("{}        {}", row, status[idx]);
+            output.writeln(&format!("{}        {}", row, status[idx]));
         } else {
-            println!("{}", row);
+            output.writeln(&row);
         }
     }
-    println!("{}", border);
+    output.writeln(&border);
+    Ok(())
 }
 
 #[cfg(test)]
@@ -77,40 +81,50 @@ mod tests {
 
     #[test]
     fn short_range_scan_does_not_panic() {
+        use crate::io::test_utils::MockOutput;
         let mut galaxy = Galaxy::new(42);
+        let mut output = MockOutput::new();
         // Just verify it runs without panicking
-        short_range_scan(&mut galaxy);
+        short_range_scan(&mut galaxy, &mut output).unwrap();
     }
 
     #[test]
     fn short_range_scan_blocked_when_sensors_damaged() {
+        use crate::io::test_utils::MockOutput;
         let mut galaxy = Galaxy::new(42);
+        let mut output = MockOutput::new();
         galaxy.enterprise.devices[Device::ShortRangeSensors as usize] = -1.0;
         // Should print damage message and return without panicking
-        short_range_scan(&mut galaxy);
+        short_range_scan(&mut galaxy, &mut output).unwrap();
     }
 
     #[test]
     fn long_range_scan_does_not_panic() {
+        use crate::io::test_utils::MockOutput;
         let mut galaxy = Galaxy::new(42);
-        long_range_scan(&mut galaxy);
+        let mut output = MockOutput::new();
+        long_range_scan(&mut galaxy, &mut output).unwrap();
     }
 
     #[test]
     fn long_range_scan_blocked_when_sensors_damaged() {
+        use crate::io::test_utils::MockOutput;
         let mut galaxy = Galaxy::new(42);
+        let mut output = MockOutput::new();
         galaxy.enterprise.devices[Device::LongRangeSensors as usize] = -1.0;
         // Should print damage message and return without panicking
-        long_range_scan(&mut galaxy);
+        long_range_scan(&mut galaxy, &mut output).unwrap();
     }
 
     #[test]
     fn long_range_scan_updates_computer_memory() {
+        use crate::io::test_utils::MockOutput;
         let mut galaxy = Galaxy::new(42);
+        let mut output = MockOutput::new();
         // Reset computer memory to verify LRS populates it
         galaxy.computer_memory = [[-1; GALAXY_SIZE]; GALAXY_SIZE];
 
-        long_range_scan(&mut galaxy);
+        long_range_scan(&mut galaxy, &mut output).unwrap();
 
         let qx = galaxy.enterprise.quadrant.x;
         let qy = galaxy.enterprise.quadrant.y;
@@ -132,11 +146,13 @@ mod tests {
 
     #[test]
     fn long_range_scan_does_not_record_when_computer_damaged() {
+        use crate::io::test_utils::MockOutput;
         let mut galaxy = Galaxy::new(42);
+        let mut output = MockOutput::new();
         galaxy.computer_memory = [[-1; GALAXY_SIZE]; GALAXY_SIZE];
         galaxy.enterprise.devices[Device::Computer as usize] = -1.0;
 
-        long_range_scan(&mut galaxy);
+        long_range_scan(&mut galaxy, &mut output).unwrap();
 
         // All memory should remain unscanned (-1)
         for y in 0..GALAXY_SIZE {

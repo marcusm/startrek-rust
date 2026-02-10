@@ -1,10 +1,11 @@
 mod cli;
 mod models;
 mod services;
+mod io;
 
-use std::io::{self, Write};
+use std::io::{self as stdio, Write};
 
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = cli::args::parse();
 
     // Centered title
@@ -14,9 +15,9 @@ fn main() {
     // Instructions prompt (only if no seed provided via CLI)
     if args.seed.is_none() {
         print!("ENTER 1 OR 2 FOR INSTRUCTIONS (ENTER 2 TO PAGE) ");
-        io::stdout().flush().unwrap();
+        stdio::stdout().flush()?;
         let mut input = String::new();
-        io::stdin().read_line(&mut input).unwrap();
+        stdio::stdin().read_line(&mut input)?;
         match input.trim() {
             "1" => show_instructions(false),
             "2" => show_instructions(true),
@@ -29,15 +30,16 @@ fn main() {
         s
     } else {
         print!("ENTER SEED NUMBER ");
-        io::stdout().flush().unwrap();
+        stdio::stdout().flush()?;
         let mut input = String::new();
-        io::stdin().read_line(&mut input).unwrap();
+        stdio::stdin().read_line(&mut input)?;
         input.trim().parse().unwrap_or(0)
     };
 
     println!("INITIALIZING...");
     let mut game = services::game::Game::new(seed);
-    game.run();
+    game.run()?;
+    Ok(())
 }
 
 /// Print text centered within a given width.
@@ -92,9 +94,9 @@ fn show_instructions(paged: bool) {
             println!("{}", line);
             if (i + 1) % 20 == 0 && i + 1 < instructions.len() {
                 print!("-- PRESS ENTER TO CONTINUE -- ");
-                io::stdout().flush().unwrap();
+                stdio::stdout().flush().unwrap();
                 let mut input = String::new();
-                io::stdin().read_line(&mut input).unwrap();
+                stdio::stdin().read_line(&mut input).unwrap();
             }
         }
     } else {
