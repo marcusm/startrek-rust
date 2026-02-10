@@ -5,7 +5,27 @@ use crate::models::galaxy::Galaxy;
 use crate::models::position::SectorPosition;
 use crate::ui::presenters::EnterprisePresenter;
 
-/// Library Computer — Command 7 (spec section 6.7).
+/// Accesses the ship's library computer functions (Command 7)
+///
+/// Provides access to three computer functions:
+/// - Option 0: Cumulative Galactic Record - Shows scanned quadrant data
+/// - Option 1: Status Report - Shows mission status and damage report
+/// - Option 2: Photon Torpedo Data - Calculates targeting information
+///
+/// # Arguments
+///
+/// * `galaxy` - The game galaxy state
+/// * `io` - Input reader for getting menu selection and function parameters
+/// * `output` - Output writer for displaying computer output
+///
+/// # Returns
+///
+/// * `Ok(())` on successful execution
+/// * `Err` if I/O operations fail
+///
+/// # Specification
+///
+/// See spec section 6.7 for full details on computer functions.
 pub fn library_computer(
     galaxy: &mut Galaxy,
     io: &mut dyn InputReader,

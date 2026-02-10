@@ -2,6 +2,7 @@ use super::constants::{Device, INITIAL_ENERGY, INITIAL_SHIELDS, INITIAL_TORPEDOE
 use super::position::{QuadrantPosition, SectorPosition};
 
 /// The player's starship.
+#[derive(Debug)]
 pub struct Enterprise {
     quadrant: QuadrantPosition,
     sector: SectorPosition,

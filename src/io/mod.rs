@@ -1,3 +1,8 @@
+//! Input/output abstractions
+//!
+//! Provides traits for input and output operations, enabling testing
+//! by allowing mock implementations.
+
 use std::io::{self, Write};
 
 /// Trait for reading user input

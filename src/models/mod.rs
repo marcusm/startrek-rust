@@ -1,3 +1,8 @@
+//! Domain models
+//!
+//! This module contains all domain models representing game entities
+//! and concepts. Models are pure data structures with minimal logic.
+
 pub mod constants;
 pub mod position;
 pub mod enterprise;

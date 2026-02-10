@@ -1,9 +1,32 @@
+//! Scanning operations
+//!
+//! Provides short-range and long-range sensor scanning capabilities
+//! for viewing the current sector and surrounding quadrants.
+
 use crate::io::OutputWriter;
 use crate::models::constants::{Device, GALAXY_SIZE, SECTOR_SIZE};
 use crate::models::errors::GameResult;
 use crate::models::galaxy::Galaxy;
 
-/// Long Range Sensor Scan — Command 2 (spec section 6.2).
+/// Performs a long-range sensor scan of surrounding quadrants (Command 2)
+///
+/// Scans a 3x3 grid centered on the Enterprise's current quadrant and
+/// displays the encoded contents (Klingons, Starbases, Stars) of each
+/// quadrant. Also records the scanned quadrants in the ship's computer memory.
+///
+/// # Arguments
+///
+/// * `galaxy` - The game galaxy state
+/// * `output` - Output writer for displaying results
+///
+/// # Returns
+///
+/// * `Ok(())` on success
+/// * `Err` if output operations fail
+///
+/// # Specification
+///
+/// See spec section 6.2 for full details on long-range scanning.
 pub fn long_range_scan(galaxy: &mut Galaxy, output: &mut dyn OutputWriter) -> GameResult<()> {
     if galaxy.enterprise().is_damaged(Device::LongRangeSensors) {
         output.writeln("LONG RANGE SENSORS ARE INOPERABLE");
@@ -37,7 +60,25 @@ pub fn long_range_scan(galaxy: &mut Galaxy, output: &mut dyn OutputWriter) -> Ga
     Ok(())
 }
 
-/// Short Range Sensor Scan — Command 1 (spec section 6.1).
+/// Performs a short-range sensor scan of the current sector (Command 1)
+///
+/// Displays an 8x8 sector map showing the positions of the Enterprise,
+/// Klingons, starbases, and stars. Also shows current game status including
+/// stardate, condition, energy, shields, and torpedo count.
+///
+/// # Arguments
+///
+/// * `galaxy` - The game galaxy state
+/// * `output` - Output writer for displaying the sector map
+///
+/// # Returns
+///
+/// * `Ok(())` on success
+/// * `Err` if output operations fail
+///
+/// # Specification
+///
+/// See spec section 6.1 for full details on short-range scanning.
 pub fn short_range_scan(galaxy: &mut Galaxy, output: &mut dyn OutputWriter) -> GameResult<()> {
     galaxy.check_docking();
     let condition = galaxy.evaluate_condition();

@@ -1,15 +1,29 @@
+//! Galaxy model
+//!
+//! Represents the game universe with 8x8 quadrants, each containing
+//! Klingons, starbases, stars, and the Enterprise.
+
+mod generation;
+mod quadrant_ops;
+
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
+use std::fmt;
 
 use super::constants::{
-    Condition, Device, GALAXY_SIZE, INITIAL_ENERGY, MISSION_DURATION, SectorContent,
+    Condition, GALAXY_SIZE, INITIAL_ENERGY, MISSION_DURATION, SectorContent,
 };
 use super::enterprise::Enterprise;
 use super::errors::GameResult;
-use super::klingon::Klingon;
 use super::position::{QuadrantPosition, SectorPosition};
 use super::quadrant::QuadrantData;
 use super::sector_map::SectorMap;
+
+use generation::generate_galaxy;
+use quadrant_ops::{
+    decrement_quadrant_klingons, decrement_quadrant_starbases, enter_quadrant,
+    record_quadrant_to_memory,
+};
 
 /// Consolidated Klingon count tracking
 struct KlingonCount {
@@ -42,7 +56,7 @@ impl Galaxy {
         let starting_stardate = (rng.gen::<f64>() * 20.0 + 20.0).floor() * 100.0;
 
         // Generate galaxy with regeneration guard (spec 3.4, 3.5)
-        let (quadrants, total_klingons, total_starbases) = Self::generate_galaxy(&mut rng);
+        let (quadrants, total_klingons, total_starbases) = generate_galaxy(&mut rng);
 
         // Random starting position (spec 3.3)
         let quadrant = QuadrantPosition {
@@ -234,112 +248,15 @@ impl Galaxy {
 
     // ========== End Atomic Update Methods ==========
 
-    /// Generate the 8x8 galaxy. Loops until the regeneration guard passes
-    /// (total_klingons > 0 AND total_starbases > 0).
-    fn generate_galaxy(
-        rng: &mut StdRng,
-    ) -> ([[QuadrantData; GALAXY_SIZE]; GALAXY_SIZE], i32, i32) {
-        loop {
-            let mut quadrants = [[QuadrantData {
-                klingons: 0,
-                starbases: 0,
-                stars: 0,
-            }; GALAXY_SIZE]; GALAXY_SIZE];
-            let mut total_klingons = 0;
-            let mut total_starbases = 0;
-
-            for y in 0..GALAXY_SIZE {
-                for x in 0..GALAXY_SIZE {
-                    let f: f64 = rng.gen();
-                    let klingons = if f > 0.98 {
-                        3
-                    } else if f > 0.95 {
-                        2
-                    } else if f > 0.80 {
-                        1
-                    } else {
-                        0
-                    };
-
-                    let f: f64 = rng.gen();
-                    let starbases = if f > 0.96 { 1 } else { 0 };
-
-                    let stars = (rng.gen::<f64>() * 8.0 + 1.0).floor() as i32;
-
-                    quadrants[y][x] = QuadrantData {
-                        klingons,
-                        starbases,
-                        stars,
-                    };
-                    total_klingons += klingons;
-                    total_starbases += starbases;
-                }
-            }
-
-            if total_klingons > 0 && total_starbases > 0 {
-                return (quadrants, total_klingons, total_starbases);
-            }
-        }
-    }
-
     /// Enter the current quadrant: clear sector map and place all entities.
     /// Called on game start and every quadrant transition (spec section 4).
     pub fn enter_quadrant(&mut self) {
-        self.sector_map = SectorMap::new();
-
-        // Place the Enterprise
-        self.sector_map
-            .set(self.enterprise.sector(), SectorContent::Enterprise);
-
-        // Place Klingons (each with shields = 200)
-        let qdata = self.get_current_quadrant_data();
-        let num_klingons = qdata.klingons;
-        let num_starbases = qdata.starbases;
-        let num_stars = qdata.stars;
-
-        for _ in 0..num_klingons {
-            let pos = self.find_random_empty_sector();
-            self.sector_map.set(pos, SectorContent::Klingon);
-            self.sector_map.klingons.push(Klingon::new(pos));
-        }
-
-        // Place starbases
-        for _ in 0..num_starbases {
-            let pos = self.find_random_empty_sector();
-            self.sector_map.set(pos, SectorContent::Starbase);
-            self.sector_map.starbase = Some(pos);
-        }
-
-        // Place stars
-        for _ in 0..num_stars {
-            let pos = self.find_random_empty_sector();
-            self.sector_map.set(pos, SectorContent::Star);
-        }
-
-        // Red alert check (spec section 4.2)
-        if !self.sector_map.klingons.is_empty() && self.enterprise.shields() <= 200.0 {
-            println!("COMBAT AREA      CONDITION RED");
-            println!("   SHIELDS DANGEROUSLY LOW");
-        }
-    }
-
-    /// Find a random empty sector by picking random coordinates until one is empty.
-    fn find_random_empty_sector(&mut self) -> SectorPosition {
-        loop {
-            let pos = SectorPosition {
-                x: self.rng.gen_range(1..=8),
-                y: self.rng.gen_range(1..=8),
-            };
-            if self.sector_map.is_empty(pos) {
-                return pos;
-            }
-        }
-    }
-
-    /// Get the QuadrantData for the Enterprise's current quadrant.
-    fn get_current_quadrant_data(&self) -> QuadrantData {
-        let q = self.enterprise.quadrant();
-        self.quadrants[(q.y - 1) as usize][(q.x - 1) as usize]
+        enter_quadrant(
+            &mut self.sector_map,
+            &self.enterprise,
+            &self.quadrants,
+            &mut self.rng,
+        );
     }
 
     /// Check if the Enterprise is adjacent to a starbase and dock if so.
@@ -351,13 +268,13 @@ impl Galaxy {
     /// Record a quadrant's data into computer memory.
     /// Does nothing if the Computer device is damaged or coordinates are out of range.
     pub fn record_quadrant_to_memory(&mut self, x: i32, y: i32) {
-        if self.enterprise.is_damaged(Device::Computer) {
-            return;
-        }
-        if x >= 1 && x <= 8 && y >= 1 && y <= 8 {
-            self.computer_memory[(y - 1) as usize][(x - 1) as usize] =
-                Some(self.quadrants[(y - 1) as usize][(x - 1) as usize]);
-        }
+        record_quadrant_to_memory(
+            &mut self.computer_memory,
+            &self.quadrants,
+            &self.enterprise,
+            x,
+            y,
+        );
     }
 
     /// Evaluate the ship's condition code (spec section 9.4).
@@ -393,16 +310,24 @@ impl Galaxy {
 
     /// Update the quadrant's klingon count after removing one.
     pub fn decrement_quadrant_klingons(&mut self) {
-        let q = self.enterprise.quadrant();
-        self.quadrants[(q.y - 1) as usize][(q.x - 1) as usize].klingons -= 1;
+        decrement_quadrant_klingons(&mut self.quadrants, &self.enterprise);
     }
 
     /// Update the quadrant's starbase count after removing one.
     pub fn decrement_quadrant_starbases(&mut self) {
-        let q = self.enterprise.quadrant();
-        self.quadrants[(q.y - 1) as usize][(q.x - 1) as usize].starbases -= 1;
+        decrement_quadrant_starbases(&mut self.quadrants, &self.enterprise);
     }
+}
 
+// Custom Debug that doesn't expose RNG internals
+impl fmt::Debug for Galaxy {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("Galaxy")
+            .field("stardate", &self.stardate)
+            .field("total_klingons", &self.total_klingons())
+            .field("starbases", &self.total_starbases())
+            .finish_non_exhaustive()
+    }
 }
 
 #[cfg(test)]
