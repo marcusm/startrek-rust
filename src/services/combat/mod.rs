@@ -14,6 +14,7 @@ pub use torpedoes::fire_torpedoes;
 pub use shields::shield_control;
 pub use klingon_attack::{klingons_fire, dead_in_space_loop};
 
-// Re-export helper functions for tests
-#[cfg(test)]
+// Re-export helper functions (used in property tests)
+// Exported for property-based tests, may appear unused in bin target
+#[allow(unused_imports)]
 pub use phasers::calculate_distance;

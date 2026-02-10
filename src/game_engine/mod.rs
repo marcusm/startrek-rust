@@ -22,6 +22,7 @@ pub enum GameState {
 pub enum DefeatReason {
     ShipDestroyed,
     TimeExpired,
+    #[allow(dead_code)]
     DeadInSpace,
 }
 
@@ -53,6 +54,7 @@ impl GameEngine {
     }
 
     /// Returns the current game state
+    #[allow(dead_code)]
     pub fn state(&self) -> &GameState {
         &self.state
     }

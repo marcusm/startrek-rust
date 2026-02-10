@@ -2,6 +2,7 @@ use crate::io::{InputReader, OutputWriter};
 use crate::models::constants::{Device, SectorContent};
 use crate::models::errors::GameResult;
 use crate::models::galaxy::Galaxy;
+use crate::models::navigation_types::{Course, WarpFactor};
 use crate::models::position::SectorPosition;
 use crate::services::combat;
 
@@ -40,10 +41,10 @@ pub fn navigate(
     };
 
     // If Klingons present, they fire before warp move (spec section 8.1)
-    if !galaxy.sector_map().klingons.is_empty() {
-        if combat::klingons_fire(galaxy, output) {
-            return Ok(()); // Enterprise destroyed, game ended
-        }
+    if !galaxy.sector_map().klingons.is_empty()
+        && combat::klingons_fire(galaxy, output)
+    {
+        return Ok(()); // Enterprise destroyed, game ended
     }
 
     // Energy/shields check (no-Klingons path, spec section 10.4)
@@ -78,9 +79,9 @@ fn read_course_and_warp(
     galaxy: &Galaxy,
     io: &mut dyn InputReader,
     output: &mut dyn OutputWriter,
-) -> GameResult<Option<(f64, f64)>> {
+) -> GameResult<Option<(Course, WarpFactor)>> {
     // Course input loop
-    let course: f64 = loop {
+    let course: Course = loop {
         let input = io.read_line("COURSE (1-9)")?;
         let value: f64 = match input.trim().parse() {
             Ok(v) => v,
@@ -89,24 +90,25 @@ fn read_course_and_warp(
         if value == 0.0 {
             return Ok(None);
         }
-        if value >= 1.0 && value < 9.0 {
-            break value;
+        match Course::new(value) {
+            Ok(c) => break c,
+            Err(_) => continue, // Invalid range — re-prompt
         }
-        // Invalid range — re-prompt
     };
 
     // Warp factor input
     let input = io.read_line("WARP FACTOR (0-8)")?;
-    let warp_factor: f64 = match input.trim().parse() {
+    let warp_value: f64 = match input.trim().parse() {
         Ok(v) => v,
         Err(_) => return Ok(None),
     };
-    if warp_factor < 0.0 || warp_factor > 8.0 {
-        return Ok(None);
-    }
+    let warp_factor = match WarpFactor::new(warp_value) {
+        Ok(w) => w,
+        Err(_) => return Ok(None),
+    };
 
     // Check for damaged warp engines
-    if galaxy.enterprise().is_damaged(Device::WarpEngines) && warp_factor > 0.2 {
+    if galaxy.enterprise().is_damaged(Device::WarpEngines) && warp_factor.value() > 0.2 {
         output.writeln("WARP ENGINES ARE DAMAGED, MAXIMUM SPEED = WARP .2");
         return Ok(None);
     }
@@ -116,9 +118,9 @@ fn read_course_and_warp(
 
 /// Execute the warp move: step through sectors, handle collisions and
 /// quadrant boundary crossings, update energy and stardate.
-fn execute_move(galaxy: &mut Galaxy, course: f64, warp_factor: f64, output: &mut dyn OutputWriter) {
-    let (dx, dy) = calculate_direction(course);
-    let n = (warp_factor * 8.0).floor() as i32;
+fn execute_move(galaxy: &mut Galaxy, course: Course, warp_factor: WarpFactor, output: &mut dyn OutputWriter) {
+    let (dx, dy) = calculate_direction(course.value());
+    let n = (warp_factor.value() * 8.0).floor() as i32;
 
     if n == 0 {
         return;
@@ -141,7 +143,7 @@ fn execute_move(galaxy: &mut Galaxy, course: f64, warp_factor: f64, output: &mut
         sy += dy;
 
         // Boundary check: leaving the quadrant?
-        if sx < 0.5 || sx >= 8.5 || sy < 0.5 || sy >= 8.5 {
+        if !(0.5..8.5).contains(&sx) || !(0.5..8.5).contains(&sy) {
             crossed_boundary = true;
             break;
         }
@@ -207,7 +209,7 @@ fn execute_move(galaxy: &mut Galaxy, course: f64, warp_factor: f64, output: &mut
         galaxy.enterprise_mut().move_to(quadrant, new_sector);
 
         // Advance stardate only for warp >= 1
-        if warp_factor >= 1.0 {
+        if warp_factor.is_warp() {
             galaxy.advance_time(1.0);
             check_time_limit(galaxy, output);
         }
@@ -251,7 +253,7 @@ mod tests {
         place_enterprise_for_test(&mut galaxy, 4, 4, 4, 4);
 
         // Warp 1.0 → n=8, cost = 8-5 = 3
-        execute_move(&mut galaxy,3.0, 1.0, &mut MockOutput::new());
+        execute_move(&mut galaxy, Course::new(3.0).unwrap(), WarpFactor::new(1.0).unwrap(), &mut MockOutput::new());
         let expected = initial_energy - 3.0;
         assert!(
             (galaxy.enterprise().energy() - expected).abs() < 1e-10,
@@ -268,7 +270,7 @@ mod tests {
         place_enterprise_for_test(&mut galaxy, 4, 4, 4, 4);
 
         // Warp 0.5 → n=4, cost = 4-5 = -1 → gains 1 energy
-        execute_move(&mut galaxy,3.0, 0.5, &mut MockOutput::new());
+        execute_move(&mut galaxy, Course::new(3.0).unwrap(), WarpFactor::new(0.5).unwrap(), &mut MockOutput::new());
         let expected = initial_energy + 1.0;
         assert!(
             (galaxy.enterprise().energy() - expected).abs() < 1e-10,
@@ -286,7 +288,7 @@ mod tests {
 
         // Warp 8.0 → n=64, cost = 64-5 = 59
         // Will cross boundary, but energy cost still applies
-        execute_move(&mut galaxy,3.0, 8.0, &mut MockOutput::new());
+        execute_move(&mut galaxy, Course::new(3.0).unwrap(), WarpFactor::new(8.0).unwrap(), &mut MockOutput::new());
         let expected = initial_energy - 59.0;
         assert!(
             (galaxy.enterprise().energy() - expected).abs() < 1e-10,
@@ -306,7 +308,7 @@ mod tests {
 
         // Course 1 (east), warp 1.0 — will cross quadrant boundary (8 steps from sector 1)
         // Boundary crossing always advances stardate
-        execute_move(&mut galaxy,1.0, 1.0, &mut MockOutput::new());
+        execute_move(&mut galaxy, Course::new(1.0).unwrap(), WarpFactor::new(1.0).unwrap(), &mut MockOutput::new());
         assert!(
             galaxy.stardate() > initial_stardate,
             "stardate should advance at warp >= 1.0",
@@ -320,7 +322,7 @@ mod tests {
         place_enterprise_for_test(&mut galaxy, 4, 4, 4, 4);
 
         // Course 3 (north), warp 0.25 → n=2 steps, stays in quadrant
-        execute_move(&mut galaxy,3.0, 0.25, &mut MockOutput::new());
+        execute_move(&mut galaxy, Course::new(3.0).unwrap(), WarpFactor::new(0.25).unwrap(), &mut MockOutput::new());
         assert!(
             (galaxy.stardate() - initial_stardate).abs() < 1e-10,
             "stardate should not advance for sub-warp without crossing",
@@ -335,7 +337,7 @@ mod tests {
         place_enterprise_for_test(&mut galaxy, 4, 4, 2, 4);
 
         // Course 1 (east), warp 0.25 → n=2 steps
-        execute_move(&mut galaxy,1.0, 0.25, &mut MockOutput::new());
+        execute_move(&mut galaxy, Course::new(1.0).unwrap(), WarpFactor::new(0.25).unwrap(), &mut MockOutput::new());
         assert_eq!(galaxy.enterprise().sector().x, 4);
         assert_eq!(galaxy.enterprise().sector().y, 4);
     }
@@ -346,7 +348,7 @@ mod tests {
         place_enterprise_for_test(&mut galaxy, 4, 4, 4, 6);
 
         // Course 3 (north, dy=-1), warp 0.375 → n=3 steps
-        execute_move(&mut galaxy,3.0, 0.375, &mut MockOutput::new());
+        execute_move(&mut galaxy, Course::new(3.0).unwrap(), WarpFactor::new(0.375).unwrap(), &mut MockOutput::new());
         assert_eq!(galaxy.enterprise().sector().x, 4);
         assert_eq!(galaxy.enterprise().sector().y, 3);
     }
@@ -357,7 +359,7 @@ mod tests {
         place_enterprise_for_test(&mut galaxy, 4, 4, 4, 2);
 
         // Course 7 (south, dy=+1), warp 0.25 → n=2 steps
-        execute_move(&mut galaxy,7.0, 0.25, &mut MockOutput::new());
+        execute_move(&mut galaxy, Course::new(7.0).unwrap(), WarpFactor::new(0.25).unwrap(), &mut MockOutput::new());
         assert_eq!(galaxy.enterprise().sector().x, 4);
         assert_eq!(galaxy.enterprise().sector().y, 4);
     }
@@ -376,7 +378,7 @@ mod tests {
 
         // Course 1 (east), warp 0.5 → n=4 steps from sector (1,4)
         // Should stop at (3,4) — one before the star
-        execute_move(&mut galaxy,1.0, 0.5, &mut MockOutput::new());
+        execute_move(&mut galaxy, Course::new(1.0).unwrap(), WarpFactor::new(0.5).unwrap(), &mut MockOutput::new());
         assert_eq!(galaxy.enterprise().sector().x, 3);
         assert_eq!(galaxy.enterprise().sector().y, 4);
     }
@@ -392,7 +394,7 @@ mod tests {
 
         // Course 1 (east), warp 0.5 → n=4 steps from sector 7
         // Steps: 8 (boundary check: 8 < 8.5 is false at >= 8.5), so step 2 → sx=9 → crosses
-        execute_move(&mut galaxy,1.0, 0.5, &mut MockOutput::new());
+        execute_move(&mut galaxy, Course::new(1.0).unwrap(), WarpFactor::new(0.5).unwrap(), &mut MockOutput::new());
 
         // Should have crossed into a new quadrant
         assert_ne!(

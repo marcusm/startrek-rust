@@ -14,6 +14,7 @@ pub trait InputReader {
 /// Trait for writing output to the user
 pub trait OutputWriter {
     /// Write a message without a newline
+    #[allow(dead_code)]
     fn write(&mut self, message: &str);
     /// Write a message with a newline
     fn writeln(&mut self, message: &str);
@@ -48,11 +49,13 @@ pub mod test_utils {
     use std::collections::VecDeque;
 
     /// Mock input reader for testing
+    #[allow(dead_code)]
     pub struct MockInput {
         responses: VecDeque<String>,
     }
 
     impl MockInput {
+        #[allow(dead_code)]
         pub fn new(responses: Vec<&str>) -> Self {
             Self {
                 responses: responses.into_iter().map(|s| s.to_string()).collect(),
@@ -71,6 +74,12 @@ pub mod test_utils {
     /// Mock output writer for testing
     pub struct MockOutput {
         pub messages: Vec<String>,
+    }
+
+    impl Default for MockOutput {
+        fn default() -> Self {
+            Self::new()
+        }
     }
 
     impl MockOutput {

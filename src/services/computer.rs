@@ -57,7 +57,7 @@ fn cumulative_galactic_record(galaxy: &Galaxy, output: &mut dyn OutputWriter) {
 
     let border = "-------------------------------------------------";
     for y in 0..GALAXY_SIZE {
-        output.writeln(&border);
+        output.writeln(border);
         let mut cells: Vec<String> = Vec::new();
         for x in 0..GALAXY_SIZE {
             let val = galaxy.computer_memory()[y][x];
@@ -71,7 +71,7 @@ fn cumulative_galactic_record(galaxy: &Galaxy, output: &mut dyn OutputWriter) {
             cells[0], cells[1], cells[2], cells[3], cells[4], cells[5], cells[6], cells[7]
         ));
     }
-    output.writeln(&border);
+    output.writeln(border);
 }
 
 /// Option 1 — Status Report (spec section 6.7).

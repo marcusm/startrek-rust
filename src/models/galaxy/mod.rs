@@ -119,6 +119,7 @@ impl Galaxy {
     }
 
     /// Get initial Klingon count
+    #[allow(dead_code)]
     pub fn initial_klingons(&self) -> i32 {
         self.klingon_count.initial
     }
@@ -164,11 +165,13 @@ impl Galaxy {
     }
 
     /// Decrement total Klingon count
+    #[allow(dead_code)]
     pub fn decrement_klingons(&mut self) {
         self.klingon_count.total -= 1;
     }
 
     /// Decrement total starbase count
+    #[allow(dead_code)]
     pub fn decrement_starbases(&mut self) {
         self.total_starbases -= 1;
     }
@@ -179,32 +182,39 @@ impl Galaxy {
     }
 
     /// Get mutable reference to computer memory
+    #[allow(dead_code)]
     pub fn computer_memory_mut(&mut self) -> &mut [[Option<QuadrantData>; GALAXY_SIZE]; GALAXY_SIZE] {
         &mut self.computer_memory
     }
 
-    // Test-only setters
-    #[cfg(test)]
+    // Test-only setters (available in both unit and integration tests)
+    // Note: These methods are public for testing purposes only and should not be used in production code
+    #[doc(hidden)]
+    #[allow(dead_code)]
     pub fn set_total_klingons(&mut self, count: i32) {
         self.klingon_count.total = count;
     }
 
-    #[cfg(test)]
+    #[doc(hidden)]
+    #[allow(dead_code)]
     pub fn set_initial_klingons(&mut self, count: i32) {
         self.klingon_count.initial = count;
     }
 
-    #[cfg(test)]
+    #[doc(hidden)]
+    #[allow(dead_code)]
     pub fn set_total_starbases(&mut self, count: i32) {
         self.total_starbases = count;
     }
 
-    #[cfg(test)]
+    #[doc(hidden)]
+    #[allow(dead_code)]
     pub fn set_stardate(&mut self, stardate: f64) {
         self.stardate = stardate;
     }
 
-    #[cfg(test)]
+    #[doc(hidden)]
+    #[allow(dead_code)]
     pub fn set_starting_stardate(&mut self, stardate: f64) {
         self.starting_stardate = stardate;
     }
@@ -309,11 +319,13 @@ impl Galaxy {
     }
 
     /// Update the quadrant's klingon count after removing one.
+    #[allow(dead_code)]
     pub fn decrement_quadrant_klingons(&mut self) {
         decrement_quadrant_klingons(&mut self.quadrants, &self.enterprise);
     }
 
     /// Update the quadrant's starbase count after removing one.
+    #[allow(dead_code)]
     pub fn decrement_quadrant_starbases(&mut self) {
         decrement_quadrant_starbases(&mut self.quadrants, &self.enterprise);
     }
@@ -417,7 +429,7 @@ mod tests {
         for y in 0..GALAXY_SIZE {
             for x in 0..GALAXY_SIZE {
                 let k = galaxy.quadrants[y][x].klingons;
-                assert!(k >= 0 && k <= 3, "klingon count out of [0,3]");
+                assert!((0..=3).contains(&k), "klingon count out of [0,3]");
                 sum += k;
             }
         }
@@ -444,7 +456,7 @@ mod tests {
         for y in 0..GALAXY_SIZE {
             for x in 0..GALAXY_SIZE {
                 let s = galaxy.quadrants[y][x].stars;
-                assert!(s >= 1 && s <= 8, "stars {} out of range [1,8]", s);
+                assert!((1..=8).contains(&s), "stars {} out of range [1,8]", s);
             }
         }
     }

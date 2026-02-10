@@ -79,13 +79,14 @@ pub fn record_quadrant_to_memory(
     if enterprise.is_damaged(Device::Computer) {
         return;
     }
-    if x >= 1 && x <= 8 && y >= 1 && y <= 8 {
+    if (1..=8).contains(&x) && (1..=8).contains(&y) {
         computer_memory[(y - 1) as usize][(x - 1) as usize] =
             Some(quadrants[(y - 1) as usize][(x - 1) as usize]);
     }
 }
 
 /// Update the quadrant's klingon count after removing one.
+#[allow(dead_code)]
 pub fn decrement_quadrant_klingons(
     quadrants: &mut [[QuadrantData; 8]; 8],
     enterprise: &Enterprise,
@@ -95,6 +96,7 @@ pub fn decrement_quadrant_klingons(
 }
 
 /// Update the quadrant's starbase count after removing one.
+#[allow(dead_code)]
 pub fn decrement_quadrant_starbases(
     quadrants: &mut [[QuadrantData; 8]; 8],
     enterprise: &Enterprise,

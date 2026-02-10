@@ -52,6 +52,7 @@ impl Enterprise {
     }
 
     // Controlled mutations
+    #[allow(dead_code)]
     pub fn consume_energy(&mut self, amount: f64) -> Result<(), &'static str> {
         if self.energy >= amount {
             self.energy -= amount;
@@ -66,6 +67,7 @@ impl Enterprise {
         self.sector = sector;
     }
 
+    #[allow(dead_code)]
     pub fn set_shields(&mut self, value: f64) {
         self.shields = value;
     }
@@ -87,10 +89,12 @@ impl Enterprise {
         self.devices[device as usize] += amount;
     }
 
+    #[allow(dead_code)]
     pub fn set_energy(&mut self, value: f64) {
         self.energy = value;
     }
 
+    #[allow(dead_code)]
     pub fn set_torpedoes(&mut self, value: i32) {
         self.torpedoes = value;
     }

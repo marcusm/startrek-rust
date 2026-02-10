@@ -2,6 +2,7 @@ use crate::io::{InputReader, OutputWriter};
 use crate::models::constants::{Device, SectorContent};
 use crate::models::errors::GameResult;
 use crate::models::galaxy::Galaxy;
+use crate::models::navigation_types::Course;
 use crate::models::position::SectorPosition;
 use crate::services::navigation;
 use crate::ui::presenters::CombatPresenter;
@@ -28,23 +29,22 @@ fn check_torpedo_readiness(galaxy: &Galaxy, output: &mut dyn OutputWriter) -> bo
 
 /// Read and validate torpedo course input (spec section 6.4).
 /// Returns Some(course) if valid, None if cancelled.
-fn read_torpedo_course(io: &mut dyn InputReader) -> GameResult<Option<f64>> {
+fn read_torpedo_course(io: &mut dyn InputReader) -> GameResult<Option<Course>> {
     loop {
         let input = io.read_line("TORPEDO COURSE (1-9)")?;
-        let course: f64 = match input.trim().parse() {
+        let value: f64 = match input.trim().parse() {
             Ok(v) => v,
             Err(_) => continue, // Invalid input, re-prompt
         };
 
-        if course == 0.0 {
+        if value == 0.0 {
             return Ok(None); // Cancel command
         }
 
-        if course >= 1.0 && course < 9.0 {
-            return Ok(Some(course));
+        match Course::new(value) {
+            Ok(c) => return Ok(Some(c)),
+            Err(_) => continue, // Out of range, re-prompt
         }
-
-        // Out of range (< 1 or >= 9), re-prompt
     }
 }
 
@@ -71,9 +71,9 @@ fn handle_starbase_hit(galaxy: &mut Galaxy, pos: SectorPosition, output: &mut dy
 }
 
 /// Fire torpedo along trajectory and check for hits (spec section 6.4).
-fn fire_torpedo_trajectory(galaxy: &mut Galaxy, course: f64, output: &mut dyn OutputWriter) -> GameResult<()> {
+fn fire_torpedo_trajectory(galaxy: &mut Galaxy, course: Course, output: &mut dyn OutputWriter) -> GameResult<()> {
     // Calculate direction vector using navigation's interpolation
-    let (dx, dy) = navigation::calculate_direction(course);
+    let (dx, dy) = navigation::calculate_direction(course.value());
 
     // Start from Enterprise position (floating point for interpolation)
     let mut x = galaxy.enterprise().sector().x as f64;
@@ -87,7 +87,7 @@ fn fire_torpedo_trajectory(galaxy: &mut Galaxy, course: f64, output: &mut dyn Ou
         y += dy;
 
         // Boundary check: outside quadrant?
-        if x < 0.5 || x >= 8.5 || y < 0.5 || y >= 8.5 {
+        if !(0.5..8.5).contains(&x) || !(0.5..8.5).contains(&y) {
             output.writeln("TORPEDO MISSED");
             return Ok(());
         }
@@ -256,7 +256,7 @@ mod tests {
         galaxy.sector_map_mut().klingons.push(klingon);
 
         // Fire torpedo east (course 1.0)
-        let _ = fire_torpedo_trajectory(&mut galaxy,1.0, &mut MockOutput::new());
+        let _ = fire_torpedo_trajectory(&mut galaxy, Course::new(1.0).unwrap(), &mut MockOutput::new());
 
         // Verify Klingon destroyed
         assert_eq!(galaxy.sector_map().klingons.len(), 0);
@@ -280,7 +280,7 @@ mod tests {
         galaxy.sector_map_mut().klingons.push(klingon);
 
         // Fire torpedo east (course 1.0)
-        let _ = fire_torpedo_trajectory(&mut galaxy,1.0, &mut MockOutput::new());
+        let _ = fire_torpedo_trajectory(&mut galaxy, Course::new(1.0).unwrap(), &mut MockOutput::new());
 
         // Verify star stopped torpedo, Klingon still alive
         assert_eq!(galaxy.sector_map().get(star_pos), SectorContent::Star);
@@ -302,7 +302,7 @@ mod tests {
         galaxy.sector_map_mut().starbase = Some(starbase_pos);
 
         // Fire torpedo east (course 1.0)
-        let _ = fire_torpedo_trajectory(&mut galaxy,1.0, &mut MockOutput::new());
+        let _ = fire_torpedo_trajectory(&mut galaxy, Course::new(1.0).unwrap(), &mut MockOutput::new());
 
         // Verify starbase destroyed
         assert_eq!(galaxy.sector_map().starbase, None);
@@ -316,7 +316,7 @@ mod tests {
         galaxy.sector_map_mut().klingons.clear(); // No obstacles
 
         // Fire torpedo north (course 3.0) which will exit quadrant
-        let _ = fire_torpedo_trajectory(&mut galaxy,3.0, &mut MockOutput::new());
+        let _ = fire_torpedo_trajectory(&mut galaxy, Course::new(3.0).unwrap(), &mut MockOutput::new());
 
         // Torpedo should miss (no crash, just returns)
         // Can't verify output but should not panic
@@ -335,7 +335,7 @@ mod tests {
         galaxy.sector_map_mut().klingons.push(klingon);
 
         // Fire torpedo east (course 1.0) - should travel through (5,4), (6,4), (7,4)
-        let _ = fire_torpedo_trajectory(&mut galaxy,1.0, &mut MockOutput::new());
+        let _ = fire_torpedo_trajectory(&mut galaxy, Course::new(1.0).unwrap(), &mut MockOutput::new());
 
         // Verify Klingon destroyed at the end of path
         assert_eq!(galaxy.sector_map().klingons.len(), 0);
@@ -354,7 +354,7 @@ mod tests {
         galaxy.sector_map_mut().klingons.push(klingon);
 
         // Fire torpedo northeast with fractional course (course 2.0 is pure northeast)
-        let _ = fire_torpedo_trajectory(&mut galaxy,2.0, &mut MockOutput::new());
+        let _ = fire_torpedo_trajectory(&mut galaxy, Course::new(2.0).unwrap(), &mut MockOutput::new());
 
         // Verify Klingon destroyed
         assert_eq!(galaxy.sector_map().klingons.len(), 0);
@@ -375,7 +375,7 @@ mod tests {
         galaxy.sector_map_mut().klingons.push(klingon);
 
         // Fire east (course 1.0)
-        let _ = fire_torpedo_trajectory(&mut galaxy,1.0, &mut MockOutput::new());
+        let _ = fire_torpedo_trajectory(&mut galaxy, Course::new(1.0).unwrap(), &mut MockOutput::new());
 
         // Star should stop torpedo, Klingon survives
         assert_eq!(galaxy.sector_map().get(star_pos), SectorContent::Star);
@@ -415,7 +415,7 @@ mod tests {
         galaxy.sector_map_mut().set(klingon_pos, SectorContent::Klingon);
         galaxy.sector_map_mut().klingons.push(klingon);
 
-        let _ = fire_torpedo_trajectory(&mut galaxy,1.0, &mut MockOutput::new());
+        let _ = fire_torpedo_trajectory(&mut galaxy, Course::new(1.0).unwrap(), &mut MockOutput::new());
 
         // Klingon should be destroyed
         assert_eq!(galaxy.sector_map().klingons.len(), 0);
@@ -432,7 +432,7 @@ mod tests {
         galaxy.sector_map_mut().set(klingon_pos, SectorContent::Klingon);
         galaxy.sector_map_mut().klingons.push(klingon);
 
-        let _ = fire_torpedo_trajectory(&mut galaxy,3.0, &mut MockOutput::new());
+        let _ = fire_torpedo_trajectory(&mut galaxy, Course::new(3.0).unwrap(), &mut MockOutput::new());
 
         // Klingon should be destroyed
         assert_eq!(galaxy.sector_map().klingons.len(), 0);
@@ -449,7 +449,7 @@ mod tests {
         galaxy.sector_map_mut().set(klingon_pos, SectorContent::Klingon);
         galaxy.sector_map_mut().klingons.push(klingon);
 
-        let _ = fire_torpedo_trajectory(&mut galaxy,5.0, &mut MockOutput::new());
+        let _ = fire_torpedo_trajectory(&mut galaxy, Course::new(5.0).unwrap(), &mut MockOutput::new());
 
         // Klingon should be destroyed
         assert_eq!(galaxy.sector_map().klingons.len(), 0);
@@ -466,7 +466,7 @@ mod tests {
         galaxy.sector_map_mut().set(klingon_pos, SectorContent::Klingon);
         galaxy.sector_map_mut().klingons.push(klingon);
 
-        let _ = fire_torpedo_trajectory(&mut galaxy,7.0, &mut MockOutput::new());
+        let _ = fire_torpedo_trajectory(&mut galaxy, Course::new(7.0).unwrap(), &mut MockOutput::new());
 
         // Klingon should be destroyed
         assert_eq!(galaxy.sector_map().klingons.len(), 0);

@@ -18,6 +18,8 @@ pub fn generate_galaxy(
         let mut total_klingons = 0;
         let mut total_starbases = 0;
 
+        // Using indexed loops here because we need both x and y indices for 2D array access
+        #[allow(clippy::needless_range_loop)]
         for y in 0..GALAXY_SIZE {
             for x in 0..GALAXY_SIZE {
                 let f: f64 = rng.gen();

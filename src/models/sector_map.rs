@@ -13,6 +13,12 @@ pub struct SectorMap {
     pub starbase: Option<SectorPosition>,
 }
 
+impl Default for SectorMap {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SectorMap {
     pub fn new() -> Self {
         SectorMap {

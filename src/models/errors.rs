@@ -7,12 +7,15 @@ pub enum GameError {
     /// Failed to parse user input
     ParseError(String),
     /// Invalid input provided by user
+    #[allow(dead_code)]
     InvalidInput(String),
     /// Attempted to use a damaged device
+    #[allow(dead_code)]
     DeviceDamaged(Device),
     /// Insufficient resources (energy, torpedoes, etc.)
     InsufficientResources { required: f64, available: f64 },
     /// Navigation-related error
+    #[allow(dead_code)]
     NavigationError(String),
     /// I/O error occurred
     IoError(std::io::Error),

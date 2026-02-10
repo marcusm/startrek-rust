@@ -39,7 +39,7 @@ pub fn long_range_scan(galaxy: &mut Galaxy, output: &mut dyn OutputWriter) -> Ga
 
     let border = "-------------------";
     for dy in -1..=1_i32 {
-        output.writeln(&border);
+        output.writeln(border);
         let mut cells: Vec<String> = Vec::new();
         for dx in -1..=1_i32 {
             let scan_x = qx + dx;
@@ -56,7 +56,7 @@ pub fn long_range_scan(galaxy: &mut Galaxy, output: &mut dyn OutputWriter) -> Ga
         }
         output.writeln(&format!("| {} | {} | {} |", cells[0], cells[1], cells[2]));
     }
-    output.writeln(&border);
+    output.writeln(border);
     Ok(())
 }
 
@@ -101,7 +101,7 @@ pub fn short_range_scan(galaxy: &mut Galaxy, output: &mut dyn OutputWriter) -> G
         String::new(),
     ];
 
-    output.writeln(&border);
+    output.writeln(border);
     for y in 1..=SECTOR_SIZE as i32 {
         let row = galaxy.sector_map().render_row(y);
         let idx = (y - 1) as usize;
@@ -111,7 +111,7 @@ pub fn short_range_scan(galaxy: &mut Galaxy, output: &mut dyn OutputWriter) -> G
             output.writeln(&row);
         }
     }
-    output.writeln(&border);
+    output.writeln(border);
     Ok(())
 }
 
@@ -175,7 +175,7 @@ mod tests {
             for dx in -1..=1_i32 {
                 let sx = qx + dx;
                 let sy = qy + dy;
-                if sx >= 1 && sx <= 8 && sy >= 1 && sy <= 8 {
+                if (1..=8).contains(&sx) && (1..=8).contains(&sy) {
                     let mem = galaxy.computer_memory()[(sy - 1) as usize][(sx - 1) as usize];
                     let actual =
                         galaxy.quadrants()[(sy - 1) as usize][(sx - 1) as usize];

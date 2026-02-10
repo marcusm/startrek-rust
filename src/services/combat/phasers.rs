@@ -212,7 +212,6 @@ pub fn fire_phasers(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::io::test_utils::MockOutput;
     use crate::models::constants::SectorContent;
     use crate::models::galaxy::Galaxy;
     use crate::models::klingon::Klingon;
@@ -220,6 +219,7 @@ mod tests {
     use crate::models::sector_map::SectorMap;
 
     /// Helper: Set up a combat scenario with specified parameters.
+    #[allow(dead_code)]
     fn setup_combat_scenario(
         seed: u64,
         enterprise_energy: f64,
