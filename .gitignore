@@ -28,3 +28,4 @@ target
 # Windows artifact
 nul
 test_results.txt
+test_output.log

@@ -1,7 +1,9 @@
 mod cli;
+mod game_engine;
 mod models;
 mod services;
 mod io;
+mod ui;
 
 use std::io::{self as stdio, Write};
 

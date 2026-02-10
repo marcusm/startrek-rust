@@ -8,6 +8,7 @@ use crate::models::galaxy::Galaxy;
 use crate::models::klingon::Klingon;
 use crate::models::position::SectorPosition;
 use crate::services::navigation;
+use crate::ui::presenters::CombatPresenter;
 
 /// Calculate the Euclidean distance between two sector positions (spec section 7.1).
 pub fn calculate_distance(from: SectorPosition, to: SectorPosition) -> f64 {
@@ -116,11 +117,7 @@ fn apply_phaser_damage_to_klingons(
 
         klingon.shields -= hit;
 
-        output.writeln(&format!(
-            "{} UNIT HIT ON KLINGON AT SECTOR {},{}",
-            hit as i32, klingon.sector.x, klingon.sector.y
-        ));
-        output.writeln(&format!("   ({} LEFT)", klingon.shields.max(0.0) as i32));
+        CombatPresenter::show_klingon_hit(hit, klingon.sector, klingon.shields, output);
 
         // If Klingon destroyed, collect position for cleanup
         if !klingon.is_alive() {
@@ -139,7 +136,7 @@ fn cleanup_destroyed_klingons(
 ) -> GameResult<()> {
     // Clean up destroyed Klingons
     for pos in destroyed_positions {
-        output.writeln("*** KLINGON DESTROYED ***");
+        CombatPresenter::show_klingon_destroyed(output);
         galaxy.destroy_klingon(*pos)?;
     }
 
@@ -149,10 +146,9 @@ fn cleanup_destroyed_klingons(
 }
 
 /// Check for victory condition after Klingon destruction.
-fn check_phaser_victory(galaxy: &mut Galaxy, output: &mut dyn OutputWriter) {
-    if galaxy.is_victory() {
-        galaxy.end_victory(output);
-    }
+/// This is a no-op now - game loop will check victory condition.
+fn check_phaser_victory(_galaxy: &mut Galaxy, _output: &mut dyn OutputWriter) {
+    // Victory check moved to game loop / GameEngine
 }
 
 /// Fire Phasers — Command 3 (spec section 6.3).
@@ -235,7 +231,7 @@ fn read_torpedo_course(io: &mut dyn InputReader) -> GameResult<Option<f64>> {
 
 /// Handle Klingon hit by torpedo (spec section 6.4).
 fn handle_klingon_hit(galaxy: &mut Galaxy, pos: SectorPosition, output: &mut dyn OutputWriter) -> GameResult<()> {
-    output.writeln("*** KLINGON DESTROYED ***");
+    CombatPresenter::show_klingon_destroyed(output);
 
     // Atomically destroy Klingon
     galaxy.destroy_klingon(pos)?;
@@ -243,10 +239,7 @@ fn handle_klingon_hit(galaxy: &mut Galaxy, pos: SectorPosition, output: &mut dyn
     // Remove from klingons vector
     galaxy.sector_map_mut().klingons.retain(|k| k.sector != pos);
 
-    // Check victory condition
-    if galaxy.is_victory() {
-        galaxy.end_victory(output);
-    }
+    // Victory check moved to game loop / GameEngine
     Ok(())
 }
 
@@ -383,12 +376,8 @@ pub fn klingons_fire(galaxy: &mut Galaxy, output: &mut dyn OutputWriter) -> bool
     }
 
     // Check if Enterprise is destroyed (spec section 8.4)
-    if galaxy.enterprise().shields() < 0.0 {
-        galaxy.end_defeat(output);
-        return true; // unreachable due to exit, but explicit
-    }
-
-    false
+    // Return true so caller can check game over condition
+    galaxy.enterprise().shields() < 0.0
 }
 
 /// Shield control command (Command 5, spec section 6.5).
@@ -604,8 +593,8 @@ mod tests {
         galaxy.decrement_quadrant_klingons();
 
         assert_eq!(galaxy.total_klingons(), 0);
-        assert!(galaxy.is_victory());
-        // end_victory() would be called in real code, which exits process
+        assert!(galaxy.all_klingons_destroyed());
+        // Victory check now handled by GameEngine
     }
 
     // ========== Retain cleanup tests ==========
@@ -800,6 +789,7 @@ mod tests {
     #[test]
     fn torpedo_travels_through_empty_sectors() {
         let mut galaxy = setup_combat_scenario(42, 3000.0, 500.0, 200.0);
+        galaxy.set_total_klingons(1);
 
         // Place Klingon far to the east at (8,4)
         galaxy.sector_map_mut().klingons.clear();
@@ -868,15 +858,14 @@ mod tests {
         galaxy.sector_map_mut().set(klingon_pos, SectorContent::Klingon);
         galaxy.sector_map_mut().klingons.push(klingon);
 
-        // Note: handle_klingon_hit calls end_victory() which exits,
-        // so we can't directly test this without mocking.
+        // Victory check now handled by GameEngine
         // This test verifies the setup is correct for victory.
         assert_eq!(galaxy.total_klingons(), 1);
-        assert!(!galaxy.is_victory());
+        assert!(!galaxy.all_klingons_destroyed());
 
-        // Manually destroy to verify is_victory() works
+        // Manually destroy to verify all_klingons_destroyed() works
         galaxy.set_total_klingons(0);
-        assert!(galaxy.is_victory());
+        assert!(galaxy.all_klingons_destroyed());
     }
 
     #[test]

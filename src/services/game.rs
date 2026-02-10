@@ -1,13 +1,14 @@
+use crate::game_engine::{GameEngine, GameState, DefeatReason};
 use crate::io::{InputReader, OutputWriter, TerminalIO};
 use crate::models::errors::GameResult;
-use crate::models::galaxy::Galaxy;
 use crate::services::combat;
 use crate::services::computer;
 use crate::services::navigation;
 use crate::services::scan;
+use crate::ui::presenters::{EnterprisePresenter, CombatPresenter};
 
 pub struct Game {
-    pub galaxy: Galaxy,
+    game_engine: GameEngine,
     io: TerminalIO,
     output: TerminalIO,
 }
@@ -15,7 +16,7 @@ pub struct Game {
 impl Game {
     pub fn new(seed: u64) -> Self {
         Game {
-            galaxy: Galaxy::new(seed),
+            game_engine: GameEngine::new(seed),
             io: TerminalIO,
             output: TerminalIO,
         }
@@ -23,24 +24,24 @@ impl Game {
 
     pub fn run(&mut self) -> GameResult<()> {
         self.print_mission_briefing();
-        scan::short_range_scan(&mut self.galaxy, &mut self.output)?;
+        scan::short_range_scan(self.game_engine.galaxy_mut(), &mut self.output)?;
 
         loop {
             let input = self.io.read_line("COMMAND")?;
             let input = input.trim();
 
             let result = match input {
-                "0" => navigation::navigate(&mut self.galaxy, &mut self.io, &mut self.output),
-                "1" => scan::short_range_scan(&mut self.galaxy, &mut self.output),
-                "2" => scan::long_range_scan(&mut self.galaxy, &mut self.output),
-                "3" => combat::fire_phasers(&mut self.galaxy, &mut self.io, &mut self.output),
-                "4" => combat::fire_torpedoes(&mut self.galaxy, &mut self.io, &mut self.output),
-                "5" => combat::shield_control(&mut self.galaxy, &mut self.io, &mut self.output),
+                "0" => navigation::navigate(self.game_engine.galaxy_mut(), &mut self.io, &mut self.output),
+                "1" => scan::short_range_scan(self.game_engine.galaxy_mut(), &mut self.output),
+                "2" => scan::long_range_scan(self.game_engine.galaxy_mut(), &mut self.output),
+                "3" => combat::fire_phasers(self.game_engine.galaxy_mut(), &mut self.io, &mut self.output),
+                "4" => combat::fire_torpedoes(self.game_engine.galaxy_mut(), &mut self.io, &mut self.output),
+                "5" => combat::shield_control(self.game_engine.galaxy_mut(), &mut self.io, &mut self.output),
                 "6" => {
-                    self.galaxy.enterprise().damage_report(&mut self.output);
+                    EnterprisePresenter::show_damage_report(self.game_engine.galaxy().enterprise(), &mut self.output);
                     Ok(())
                 }
-                "7" => computer::library_computer(&mut self.galaxy, &mut self.io, &mut self.output),
+                "7" => computer::library_computer(self.game_engine.galaxy_mut(), &mut self.io, &mut self.output),
                 "q" | "Q" => {
                     self.output.writeln("GOODBYE, CAPTAIN.");
                     break;
@@ -55,12 +56,32 @@ impl Game {
             if let Err(e) = result {
                 self.output.writeln(&format!("Error: {}", e));
             }
+
+            // Check for game over after each command
+            if let Some(state) = self.game_engine.check_game_over() {
+                match state {
+                    GameState::Victory { rating } => {
+                        CombatPresenter::show_victory(rating, &mut self.output);
+                        break;
+                    }
+                    GameState::Defeat { reason } => {
+                        let message = match reason {
+                            DefeatReason::ShipDestroyed => "SHIP DESTROYED",
+                            DefeatReason::TimeExpired => "TIME EXPIRED",
+                            DefeatReason::DeadInSpace => "DEAD IN SPACE",
+                        };
+                        CombatPresenter::show_defeat(message, &mut self.output);
+                        break;
+                    }
+                    GameState::Playing => {} // Continue playing
+                }
+            }
         }
         Ok(())
     }
 
     fn print_mission_briefing(&mut self) {
-        let g = &self.galaxy;
+        let g = self.game_engine.galaxy();
         let plural = if g.total_starbases() != 1 { "S" } else { "" };
         self.output.writeln(&format!(
             "YOU MUST DESTROY {} KLINGONS IN {} STARDATES WITH {} STARBASE{}",

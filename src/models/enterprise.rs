@@ -126,21 +126,6 @@ impl Enterprise {
         }
     }
 
-    /// Print the damage control report (spec section 6.6).
-    /// If the Damage Control device is damaged, prints a failure message.
-    /// Otherwise, lists all 8 devices and their repair states (truncated to integer).
-    pub fn damage_report(&self, output: &mut dyn crate::io::OutputWriter) {
-        if self.is_damaged(Device::DamageControl) {
-            output.writeln("DAMAGE CONTROL REPORT IS NOT AVAILABLE");
-            return;
-        }
-
-        output.writeln(&format!("{:<14}{}", "DEVICE", "STATE OF REPAIR"));
-        for device in Device::ALL.iter() {
-            let state = self.devices[*device as usize] as i32;
-            output.writeln(&format!("{:<14}{}", device.name(), state));
-        }
-    }
 
     /// Check if the Enterprise is adjacent to a starbase and dock if so.
     /// Returns true if docked (spec section 9.1-9.2).
@@ -195,7 +180,6 @@ pub enum ShieldControlError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::io::test_utils::MockOutput;
     use crate::models::constants::{INITIAL_ENERGY, INITIAL_SHIELDS, INITIAL_TORPEDOES};
     use crate::models::position::SectorPosition;
 
@@ -271,48 +255,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn damage_report_shows_all_devices_when_undamaged() {
-        let e = enterprise_at(SectorPosition { x: 1, y: 1 });
-        // All devices at 0.0, DamageControl is not damaged, so report should work.
-        // We just verify it doesn't panic. (Output goes to stdout.)
-        e.damage_report(&mut MockOutput::new());
-    }
-
-    #[test]
-    fn damage_report_blocked_when_damage_control_damaged() {
-        use crate::models::constants::Device;
-        let mut e = enterprise_at(SectorPosition { x: 1, y: 1 });
-        e.damage_device(Device::DamageControl, 1.0);
-        assert!(e.is_damaged(Device::DamageControl));
-        // Should print the unavailable message and return early.
-        e.damage_report(&mut MockOutput::new());
-    }
-
-    #[test]
-    fn damage_report_available_when_other_devices_damaged() {
-        use crate::models::constants::Device;
-        let mut e = enterprise_at(SectorPosition { x: 1, y: 1 });
-        // Damage everything except DamageControl
-        e.damage_device(Device::WarpEngines, 3.0);
-        e.damage_device(Device::ShortRangeSensors, 1.0);
-        e.damage_device(Device::Computer, 5.0);
-        assert!(!e.is_damaged(Device::DamageControl));
-        // Should still produce the report.
-        e.damage_report(&mut MockOutput::new());
-    }
-
-    #[test]
-    fn damage_report_truncates_values() {
-        use crate::models::constants::Device;
-        let mut e = enterprise_at(SectorPosition { x: 1, y: 1 });
-        e.damage_device(Device::WarpEngines, 3.7);
-        e.repair_device(Device::PhaserControl, 2.9);
-        // Truncation: -3.7 as i32 = -3, 2.9 as i32 = 2
-        assert_eq!(e.devices()[Device::WarpEngines as usize] as i32, -3);
-        assert_eq!(e.devices()[Device::PhaserControl as usize] as i32, 2);
-        e.damage_report(&mut MockOutput::new());
-    }
 
     // Shield Control Tests (spec section 6.5)
 

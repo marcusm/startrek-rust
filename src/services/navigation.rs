@@ -265,18 +265,10 @@ fn execute_move(galaxy: &mut Galaxy, course: f64, warp_factor: f64, output: &mut
     random_damage_event(galaxy, output);
 }
 
-/// Check if the time limit has been exceeded and end the game if so (spec section 10.3).
-fn check_time_limit(galaxy: &Galaxy, output: &mut dyn OutputWriter) {
-    let time_limit = galaxy.starting_stardate() + galaxy.mission_duration();
-    if galaxy.stardate() > time_limit {
-        output.writeln("");
-        output.writeln(&format!("IT IS STARDATE {}", galaxy.stardate() as i32));
-        output.writeln(&format!(
-            "THERE ARE STILL {} KLINGON BATTLE CRUISERS",
-            galaxy.total_klingons()
-        ));
-        std::process::exit(0);
-    }
+/// Check if the time limit has been exceeded (spec section 10.3).
+/// Time expiration is now checked by GameEngine.
+fn check_time_limit(_galaxy: &Galaxy, _output: &mut dyn OutputWriter) {
+    // Time limit check moved to GameEngine
 }
 
 /// Automatic device repair on navigation moves (spec section 5.2).
@@ -340,13 +332,13 @@ fn dead_in_space_loop(galaxy: &mut Galaxy, output: &mut dyn OutputWriter) {
                 "THERE ARE STILL {} KLINGON BATTLE CRUISERS",
                 galaxy.total_klingons()
             ));
-            std::process::exit(0);
+            return; // Exit loop, let game engine handle defeat
         }
 
         // Klingons fire (uses existing combat::klingons_fire function)
         // This function returns true if Enterprise is destroyed (shields < 0)
         if combat::klingons_fire(galaxy, output) {
-            return; // Enterprise destroyed, end_defeat() already called
+            return; // Enterprise destroyed, let game engine handle defeat
         }
 
         // If we reach here, shields are still >= 0 despite the attack

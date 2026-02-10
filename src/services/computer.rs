@@ -3,6 +3,7 @@ use crate::models::constants::{Device, GALAXY_SIZE};
 use crate::models::errors::GameResult;
 use crate::models::galaxy::Galaxy;
 use crate::models::position::SectorPosition;
+use crate::ui::presenters::EnterprisePresenter;
 
 /// Library Computer — Command 7 (spec section 6.7).
 pub fn library_computer(
@@ -65,7 +66,7 @@ fn status_report(galaxy: &Galaxy, output: &mut dyn OutputWriter) {
     output.writeln(&format!("NUMBER OF STARBASES LEFT = {}", galaxy.total_starbases()));
 
     // Falls through to damage control report (spec section 6.7)
-    galaxy.enterprise().damage_report(output);
+    EnterprisePresenter::show_damage_report(galaxy.enterprise(), output);
 }
 
 /// Option 2 — Photon Torpedo Data (spec section 6.7).

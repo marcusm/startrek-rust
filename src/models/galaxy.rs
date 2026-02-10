@@ -375,33 +375,20 @@ impl Galaxy {
         }
     }
 
-    /// Check if the player has achieved victory (spec section 10.1).
-    pub fn is_victory(&self) -> bool {
+    /// Check if all Klingons have been destroyed (spec section 10.1).
+    pub fn all_klingons_destroyed(&self) -> bool {
         self.klingon_count.total == 0
+    }
+
+    /// Check if time has expired (spec section 10.3).
+    pub fn is_time_expired(&self) -> bool {
+        self.stardate > self.starting_stardate + self.mission_duration
     }
 
     /// Calculate the efficiency rating (spec section 7.7).
     pub fn efficiency_rating(&self) -> i32 {
         let elapsed = self.stardate - self.starting_stardate;
         ((self.klingon_count.initial as f64 / elapsed) * 1000.0) as i32
-    }
-
-    /// End the game with victory message and exit (spec section 10.1).
-    pub fn end_victory(&self, output: &mut dyn crate::io::OutputWriter) {
-        output.writeln("");
-        output.writeln("THE LAST KLINGON BATTLE CRUISER IN THE GALAXY HAS BEEN DESTROYED");
-        output.writeln("THE FEDERATION HAS BEEN SAVED !!!");
-        output.writeln("");
-        output.writeln(&format!("YOUR EFFICIENCY RATING = {}", self.efficiency_rating()));
-        std::process::exit(0);
-    }
-
-    /// End the game with defeat message and exit (spec section 10.2).
-    pub fn end_defeat(&self, output: &mut dyn crate::io::OutputWriter) {
-        output.writeln("");
-        output.writeln("THE ENTERPRISE HAS BEEN DESTROYED. THE FEDERATION WILL BE CONQUERED");
-        output.writeln(&format!("THERE ARE STILL {} KLINGON BATTLE CRUISERS", self.klingon_count.total));
-        std::process::exit(0);
     }
 
     /// Update the quadrant's klingon count after removing one.
@@ -726,16 +713,16 @@ mod tests {
     // ========== Game over condition tests ==========
 
     #[test]
-    fn is_victory_when_no_klingons() {
+    fn all_klingons_destroyed_when_no_klingons() {
         let mut galaxy = Galaxy::new(42);
         galaxy.set_total_klingons(0);
-        assert!(galaxy.is_victory());
+        assert!(galaxy.all_klingons_destroyed());
     }
 
     #[test]
-    fn not_victory_when_klingons_remain() {
+    fn not_all_klingons_destroyed_when_klingons_remain() {
         let galaxy = Galaxy::new(42);
-        assert!(!galaxy.is_victory());
+        assert!(!galaxy.all_klingons_destroyed());
         assert!(galaxy.total_klingons() > 0);
     }
 
